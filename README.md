@@ -29,6 +29,7 @@ To enable automated deployments, you need to set up the following secrets in you
 3. Add the following secrets:
    - `AWS_ACCESS_KEY_ID`: Your AWS access key ID
    - `AWS_SECRET_ACCESS_KEY`: Your AWS secret access key
+   - `LAMBDA_FUNCTION_NAME`: Your AWS Lambda function name (e.g., "my-story-buddy-backend")
 
 ### Required AWS Permissions
 
