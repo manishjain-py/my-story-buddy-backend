@@ -1,58 +1,87 @@
 # My Story Buddy Backend
 
-A FastAPI backend service for generating custom stories using OpenAI's GPT model. The service is deployed on AWS Lambda with API Gateway.
+A FastAPI backend for generating stories using OpenAI's GPT model.
 
-## Setup
+## Development
 
-1. Create a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+```bash
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+# Install dependencies
+pip install -r requirements.txt
 
-3. Set up environment variables:
-   ```bash
-   export OPENAI_API_KEY=your_api_key_here
-   ```
-
-4. Run locally:
-   ```bash
-   uvicorn main:app --reload
-   ```
+# Run the development server
+uvicorn main:app --reload
+```
 
 ## Deployment
 
-The backend is deployed on AWS Lambda with API Gateway. To deploy:
+The application is automatically deployed to AWS Lambda when changes are pushed to the main branch.
 
-1. Build the deployment package:
-   ```bash
-   ./build.sh
-   ```
+### Setting up GitHub Actions
 
-2. Upload the generated `deployment.zip` to AWS Lambda.
+To enable automated deployments, you need to set up the following secrets in your GitHub repository:
 
-3. Configure the Lambda function:
-   - Set the handler to `lambda_function.lambda_handler`
-   - Set the timeout to 30 seconds
-   - Add the `OPENAI_API_KEY` environment variable
+1. Go to your repository settings
+2. Navigate to "Secrets and variables" > "Actions"
+3. Add the following secrets:
+   - `AWS_ACCESS_KEY_ID`: Your AWS access key ID
+   - `AWS_SECRET_ACCESS_KEY`: Your AWS secret access key
 
-## API Endpoints
+### Required AWS Permissions
 
-- `POST /generateStory`: Generate a story based on the provided prompt
-  ```json
-  {
-    "prompt": "A story about a robot in space"
-  }
-  ```
+The AWS user needs the following permissions:
+- `lambda:UpdateFunctionCode`
+- `lambda:GetFunction`
+
+Example IAM policy:
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "lambda:UpdateFunctionCode",
+                "lambda:GetFunction"
+            ],
+            "Resource": "arn:aws:lambda:us-west-2:*:function:my-story-buddy-backend"
+        }
+    ]
+}
+```
+
+## Manual Deployment
+
+If you need to deploy manually:
+
+```bash
+# Create deployment package
+mkdir -p deployment
+cp main.py deployment/
+cp requirements.txt deployment/
+cd deployment
+pip install -r requirements.txt -t .
+zip -r ../deployment.zip .
+
+# Deploy to Lambda
+aws lambda update-function-code \
+  --function-name my-story-buddy-backend \
+  --zip-file fileb://deployment.zip
+```
 
 ## Environment Variables
 
 - `OPENAI_API_KEY`: Your OpenAI API key
+- `AWS_REGION`: AWS region (default: us-west-2)
+
+## API Endpoints
+
+- `POST /generateStory`: Generate a story based on the provided prompt
+  - Request body: `{ "prompt": "string" }`
+  - Response: `{ "title": "string", "story": "string" }`
 
 ## License
 
