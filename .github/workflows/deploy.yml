@@ -38,10 +38,29 @@ jobs:
           cp requirements.txt deployment/
           cd deployment
           pip install -r requirements.txt -t .
+          # Remove unnecessary files to reduce package size
+          find . -type d -name "__pycache__" -exec rm -rf {} +
+          find . -type d -name "*.dist-info" -exec rm -rf {} +
+          find . -type d -name "*.egg-info" -exec rm -rf {} +
           zip -r ../deployment.zip .
 
       - name: Deploy to Lambda
         run: |
+          # Update function code
           aws lambda update-function-code \
             --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
-            --zip-file fileb://deployment.zip 
+            --zip-file fileb://deployment.zip
+          
+          # Verify function configuration
+          aws lambda get-function \
+            --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
+            --query 'Configuration.[Runtime,Handler]' \
+            --output text
+          
+          # Update function configuration if needed
+          aws lambda update-function-configuration \
+            --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
+            --handler main.handler \
+            --runtime python3.9 \
+            --timeout 30 \
+            --memory-size 256 
