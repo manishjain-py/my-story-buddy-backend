@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
@@ -26,26 +26,75 @@ app.add_middleware(
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 class StoryRequest(BaseModel):
-    prompt: str
+    prompt: str = ""  # Make prompt optional with empty string default
 
 class StoryResponse(BaseModel):
+    title: str
     story: str
 
 @app.post("/generateStory", response_model=StoryResponse)
 async def generate_story(request: StoryRequest):
     try:
+        # If no prompt is provided, create a creative prompt
+        if not request.prompt.strip():
+            system_prompt = (
+                "You are a friendly and imaginative storyteller who creates short, fun, "
+                "and engaging stories for children aged 3 to 4. "
+                "Create a completely original and creative story that would delight young children. "
+                "The story should be written in very simple language, using short sentences "
+                "and easy words that a toddler can understand. "
+                "Make the story cute and interesting, with animals, toys, or magical things. "
+                "The story should be under 100 words and feel like it's meant to be read aloud to a small child. "
+                "Format your response exactly like this:\n"
+                "Title: [Your Title]\n\n"
+                "[First paragraph of the story]\n\n"
+                "[Second paragraph of the story]\n\n"
+                "[Third paragraph of the story]\n\n"
+                "Use double line breaks between paragraphs. Keep paragraphs short and engaging."
+            )
+            user_prompt = "Create a delightful story for young children"
+        else:
+            system_prompt = (
+                "You are a friendly and imaginative storyteller who creates short, fun, "
+                "and engaging stories for children aged 3 to 4. "
+                "The stories should be written in very simple language, using short sentences "
+                "and easy words that a toddler can understand. "
+                "If the story is based on a concept (like kindness, sharing, or brushing teeth), "
+                "explain it through a fun story, not like a lesson. "
+                "Make the story cute and interesting, with animals, toys, or magical things if possible. "
+                "The story should be under 100 words and feel like it's meant to be read aloud to a small child. "
+                "Format your response exactly like this:\n"
+                "Title: [Your Title]\n\n"
+                "[First paragraph of the story]\n\n"
+                "[Second paragraph of the story]\n\n"
+                "[Third paragraph of the story]\n\n"
+                "Use double line breaks between paragraphs. Keep paragraphs short and engaging."
+            )
+            user_prompt = request.prompt
+
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a creative storyteller who creates engaging and imaginative stories for children."},
-                {"role": "user", "content": request.prompt}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
             ],
-            max_tokens=300,  # Reduced from 500 to improve response time
+            max_tokens=300,
             temperature=0.7
         )
         
-        story = response.choices[0].message.content
-        return StoryResponse(story=story)
+        content = response.choices[0].message.content
+        
+        # Split the response into title and story
+        parts = content.split('\n\n', 1)
+        if len(parts) == 2:
+            title = parts[0].replace('Title:', '').strip()
+            story = parts[1].strip()
+        else:
+            # Fallback if the format is not as expected
+            title = "A Magical Story"
+            story = content.strip()
+        
+        return StoryResponse(title=title, story=story)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -54,11 +103,12 @@ handler = Mangum(app, lifespan="off")
 
 # Add a catch-all route to handle API Gateway stage
 @app.api_route("/{path:path}", methods=["POST"])
-async def catch_all(path: str):
+async def catch_all(path: str, request: Request):
     if path.startswith("default/"):
         path = path[8:]  # Remove "default/"
     
     if path == "generateStory":
-        return await generate_story(StoryRequest(prompt="Tell me a story about a robot in space"))
+        body = await request.json()
+        return await generate_story(StoryRequest(prompt=body.get("prompt", "")))
     
     raise HTTPException(status_code=404, detail="Not Found") 
