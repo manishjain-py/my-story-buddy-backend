@@ -31,6 +31,7 @@ class StoryRequest(BaseModel):
 class StoryResponse(BaseModel):
     title: str
     story: str
+    image_url: str
 
 @app.post("/generateStory", response_model=StoryResponse)
 async def generate_story(request: StoryRequest):
@@ -101,8 +102,22 @@ async def generate_story(request: StoryRequest):
             # Fallback if the format is not as expected
             title = "A Magical Story"
             story = content.strip()
+
+        # Generate image prompt based on the story
+        image_prompt = f"Create a child-friendly, colorful illustration for a children's story titled '{title}'. The image should be cute, simple, and suitable for young children. Use bright, cheerful colors and a simple, clear style that appeals to 3-4 year olds. The scene should be from the story: {story[:200]}..."
+
+        # Generate image using DALL-E
+        image_response = client.images.generate(
+            model="dall-e-3",
+            prompt=image_prompt,
+            size="1024x1024",
+            quality="standard",
+            n=1,
+        )
         
-        return StoryResponse(title=title, story=story)
+        image_url = image_response.data[0].url
+        
+        return StoryResponse(title=title, story=story, image_url=image_url)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
