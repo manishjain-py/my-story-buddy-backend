@@ -36,7 +36,7 @@ class StoryResponse(BaseModel):
 @app.post("/generateStory", response_model=StoryResponse)
 async def generate_story(request: StoryRequest):
     try:
-        # If no prompt is provided, create a creative prompt
+        # STEP 1: Generate the story using GPT-3.5-turbo
         if not request.prompt.strip():
             system_prompt = (
                 "You are a friendly and imaginative storyteller who creates short, fun, "
@@ -81,7 +81,7 @@ async def generate_story(request: StoryRequest):
             )
             user_prompt = request.prompt
 
-        response = client.chat.completions.create(
+        story_response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -91,7 +91,7 @@ async def generate_story(request: StoryRequest):
             temperature=0.7
         )
         
-        content = response.choices[0].message.content
+        content = story_response.choices[0].message.content
         
         # Split the response into title and story
         parts = content.split('\n\n', 1)
@@ -103,13 +103,84 @@ async def generate_story(request: StoryRequest):
             title = "A Magical Story"
             story = content.strip()
 
-        # Generate image prompt based on the story
-        image_prompt = f"Create a child-friendly, colorful illustration for a children's story titled '{title}'. The image should be cute, simple, and suitable for young children. Use bright, cheerful colors and a simple, clear style that appeals to 3-4 year olds. The scene should be from the story: {story[:200]}..."
+        # STEP 2: Generate visual storytelling prompt using GPT-3.5-turbo
+        visual_prompt_template = f"""
+You are a visual storyteller and illustrator for children's books.
 
-        # Generate image using DALL-E
+Based on the story I give you, create a prompt that can be used to generate a 4-panel comic-style illustration. The comic should be designed for children aged 3 to 5, using:
+ - Cute and friendly characters (animals, nature, toys, etc.)
+ - Pastel colors and a soft, storybook feel
+ - Speech bubbles or short captions inside each panel to represent the story text
+ - A gentle and fun tone that aligns with early childhood education
+ - Visually match this style reference: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg
+
+Each of the 4 panels should move the story forward, visually representing characters, scenes, and dialogue.
+
+Here is the story you should base the comic on:
+
+Title: {title}
+
+{story}
+
+------
+
+To help you understand the expected output, here's an example:
+
+Create a 4-panel comic-style illustration for a children's story titled "The Lost Balloon", aimed at ages 3-5. The comic should use cute and friendly characters, a soft pastel color palette, and have a storybook-like, gentle feel. Each panel should include short captions or speech bubbles to advance the story, with a warm and whimsical tone.
+
+The visual style should match this reference: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg — soft outlines, dreamy lighting, and expressive characters.
+
+⸻
+
+Panel 1
+
+Scene: A sunny park with a small girl (Lily) holding a red balloon.  
+Action: The balloon slips from Lily's hand and begins to float up.  
+Caption (inside panel): "One sunny day, a red balloon floated away from Lily's hand."
+
+⸻
+
+Panel 2
+
+Scene: The balloon soaring high in the sky past trees and rooftops. A friendly bluebird spots it.  
+Speech Bubble (bird): "Where are you going?"  
+Speech Bubble (balloon): "I'm looking for adventure!"
+
+⸻
+
+Panel 3
+
+Scene: Sunset sky with the balloon gently drifting down with a warm breeze.  
+Caption (inside panel): "At sunset, the wind gently brought the balloon back…"
+
+⸻
+
+Panel 4
+
+Scene: Lily hugging the balloon tightly, smiling with joy.  
+Caption (inside panel): "She hugged it tight."  
+A small heart above her head to show affection.
+
+⸻
+
+Make sure all characters have big, friendly eyes and gentle expressions. Use a soft, calming background in each frame with elements like clouds, birds, and treetops to keep the environment child-friendly and comforting.
+"""
+        visual_response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a visual storyteller and illustrator for children's books."},
+                {"role": "user", "content": visual_prompt_template}
+            ],
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        final_image_prompt = visual_response.choices[0].message.content
+
+        # STEP 3: Generate image using DALL-E 3
         image_response = client.images.generate(
             model="dall-e-3",
-            prompt=image_prompt,
+            prompt=final_image_prompt,
             size="1024x1024",
             quality="standard",
             n=1,
