@@ -78,6 +78,16 @@ class StoryResponse(BaseModel):
     story: str
     image_urls: list[str]
 
+class FunFactRequest(BaseModel):
+    prompt: str = ""
+
+class FunFact(BaseModel):
+    question: str
+    answer: str
+
+class FunFactsResponse(BaseModel):
+    facts: list[FunFact]
+
 # Helper functions
 def cors_error_response(message: str, status_code: int = 500):
     return JSONResponse(
@@ -386,8 +396,110 @@ async def generate_story(request: StoryRequest, req: Request):
         log_error(e, request_id)
         return cors_error_response(str(e))
 
+@app.post("/generateFunFacts", response_model=FunFactsResponse)
+async def generate_fun_facts(request: FunFactRequest, req: Request):
+    request_id = str(uuid.uuid4())
+    start_time = time.time()
+    
+    try:
+        log_request_details(req, request_id)
+        logger.info(f"Request ID: {request_id} - Starting fun facts generation")
+        logger.info(f"Request ID: {request_id} - Prompt: {request.prompt[:100]}...")
+        
+        # Create context-based fun facts prompt
+        if request.prompt.strip():
+            context_prompt = f"Create 10 fun facts related to the theme or characters from this story idea: '{request.prompt}'"
+        else:
+            context_prompt = "Create 10 fun facts about animals, nature, friendship, and adventures that would interest children"
+        
+        system_prompt = (
+            "You are a friendly educator who creates fascinating fun facts for children aged 3-5. "
+            "Generate exactly 10 fun facts in question-answer format. "
+            "Each fact should be: "
+            "- Simple and easy to understand for young children "
+            "- Educational but entertaining "
+            "- Related to the given context when possible "
+            "- Formatted as a question followed by a simple answer "
+            "- Keep questions starting with 'Did you know...' "
+            "- Keep answers friendly, short, and exciting "
+            
+            "Format your response as exactly 10 Q&A pairs like this: "
+            "Q: Did you know cats can sleep for 16 hours a day? "
+            "A: Yes! Cats love to nap and dream just like us. "
+            
+            "Q: Did you know butterflies taste with their feet? "
+            "A: Amazing! They step on flowers to see if they taste good. "
+            
+            "Make each fact delightful and wonder-filled for curious young minds."
+        )
+        
+        logger.info(f"Request ID: {request_id} - Generating fun facts with GPT-4.1...")
+        fun_facts_response = await client.chat.completions.create(
+            model="gpt-4.1",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": context_prompt}
+            ],
+            max_tokens=800,
+            temperature=0.8
+        )
+        
+        content = fun_facts_response.choices[0].message.content
+        generation_time = time.time() - start_time
+        logger.info(f"Request ID: {request_id} - Fun facts generated successfully in {generation_time:.2f} seconds")
+        
+        # Parse the Q&A pairs
+        facts = []
+        lines = content.strip().split('\n')
+        current_question = ""
+        
+        for line in lines:
+            line = line.strip()
+            if line.startswith('Q:'):
+                current_question = line[2:].strip()
+            elif line.startswith('A:') and current_question:
+                answer = line[2:].strip()
+                facts.append(FunFact(question=current_question, answer=answer))
+                current_question = ""
+        
+        # Ensure we have exactly 10 facts, pad if needed
+        while len(facts) < 10:
+            facts.append(FunFact(
+                question="Did you know reading stories helps your imagination grow?",
+                answer="Yes! Every story takes you on a magical adventure in your mind."
+            ))
+        
+        # Limit to 10 facts
+        facts = facts[:10]
+        
+        logger.info(f"Request ID: {request_id} - Parsed {len(facts)} fun facts successfully")
+        
+        return JSONResponse(
+            content={"facts": [{"question": fact.question, "answer": fact.answer} for fact in facts]},
+            headers={
+                "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except Exception as e:
+        log_error(e, request_id)
+        return cors_error_response(str(e))
+
 @app.options("/generateStory")
 async def preflight_generateStory():
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
+
+@app.options("/generateFunFacts")
+async def preflight_generateFunFacts():
     return JSONResponse(
         content={},
         headers={
@@ -416,7 +528,12 @@ async def catch_all(path: str, request: Request):
     except json.JSONDecodeError:
         prompt = ""
 
-    return await generate_story(StoryRequest(prompt=prompt), request)
+    # Route to appropriate function based on path
+    if path == "generateFunFacts":
+        return await generate_fun_facts(FunFactRequest(prompt=prompt), request)
+    else:
+        # Default to story generation for backward compatibility
+        return await generate_story(StoryRequest(prompt=prompt), request)
 
 # Create handler for AWS Lambda
 handler = Mangum(app) 
