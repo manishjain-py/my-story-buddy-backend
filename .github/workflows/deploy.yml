@@ -48,18 +48,18 @@ jobs:
         run: |
           # Update function code
           aws lambda update-function-code \
-            --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
+            --function-name my-story-buddy \
             --zip-file fileb://deployment.zip
           
           # Verify function configuration
           aws lambda get-function \
-            --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
+            --function-name my-story-buddy \
             --query 'Configuration.[Runtime,Handler]' \
             --output text
           
           # Update function configuration if needed
           aws lambda update-function-configuration \
-            --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
+            --function-name my-story-buddy \
             --handler main.handler \
             --runtime python3.9 \
             --timeout 30 \

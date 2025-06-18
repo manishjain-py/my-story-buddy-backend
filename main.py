@@ -3,20 +3,21 @@ import logging
 import time
 import json
 import asyncio
+import base64
+import uuid
+import traceback
 from datetime import datetime
+
+import httpx
+import boto3
+import botocore
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 from mangum import Mangum
-import base64
-import boto3
-import uuid
-import traceback
-import httpx
-import botocore
 
-# Configure logging with more detailed format
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -24,16 +25,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI with minimal settings
+# Initialize FastAPI
 app = FastAPI(
     title="Story Generator",
     description="API for generating stories using OpenAI",
     version="1.0.0",
-    docs_url=None,  # Disable Swagger UI
-    redoc_url=None  # Disable ReDoc
+    docs_url=None,
+    redoc_url=None
 )
 
-# Configure CORS with minimal settings
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://www.mystorybuddy.com", "http://localhost:5173"],
@@ -43,15 +44,15 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-# Initialize OpenAI client
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Constants
+S3_BUCKET = "mystorybuddy-assets"
 
-S3_BUCKET = "mystorybuddy-assets"  # Your S3 bucket name
+# Initialize clients
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Initialize S3 client
 try:
-    s3_client = boto3.client('s3')
-    # Test access to our specific bucket instead of listing all buckets
+    s3_client = boto3.client('s3', region_name=os.getenv('AWS_REGION', 'us-west-2'))
     try:
         s3_client.list_objects_v2(Bucket=S3_BUCKET, MaxKeys=1)
         logger.info(f"Successfully connected to AWS S3 bucket: {S3_BUCKET}")
@@ -67,14 +68,16 @@ except Exception as e:
     logger.warning("3. AWS credentials file: ~/.aws/credentials")
     logger.warning(f"4. Required permissions: s3:PutObject, s3:GetObject on bucket: {S3_BUCKET}")
 
+# Models
 class StoryRequest(BaseModel):
-    prompt: str = ""  # Make prompt optional with empty string default
+    prompt: str = ""
 
 class StoryResponse(BaseModel):
     title: str
     story: str
     image_url: str
 
+# Helper functions
 def log_request_details(request: Request, request_id: str):
     """Log detailed information about the incoming request."""
     logger.info(f"Request ID: {request_id}")
@@ -100,11 +103,9 @@ async def save_image_to_s3(image_bytes: bytes, content_type: str = "image/png", 
         start_time = time.time()
         logger.info(f"Request ID: {request_id} - Starting S3 upload")
         
-        # Generate a unique filename
         object_key = f"stories/{uuid.uuid4()}.png"
         logger.info(f"Request ID: {request_id} - Generated object key: {object_key}")
         
-        # Upload to S3 using asyncio.to_thread to avoid blocking
         await asyncio.to_thread(
             s3_client.put_object,
             Bucket=S3_BUCKET,
@@ -113,7 +114,6 @@ async def save_image_to_s3(image_bytes: bytes, content_type: str = "image/png", 
             ContentType=content_type
         )
         
-        # Generate a pre-signed URL that expires in 1 hour
         image_url = await asyncio.to_thread(
             s3_client.generate_presigned_url,
             'get_object',
@@ -121,7 +121,7 @@ async def save_image_to_s3(image_bytes: bytes, content_type: str = "image/png", 
                 'Bucket': S3_BUCKET,
                 'Key': object_key
             },
-            ExpiresIn=3600  # URL expires in 1 hour
+            ExpiresIn=3600
         )
         
         upload_time = time.time() - start_time
@@ -147,6 +147,7 @@ async def save_image_to_s3(image_bytes: bytes, content_type: str = "image/png", 
                 detail=f"Failed to save image: {str(e)}"
             )
 
+# Routes
 @app.post("/generateStory", response_model=StoryResponse)
 async def generate_story(request: StoryRequest, req: Request):
     request_id = str(uuid.uuid4())
@@ -157,7 +158,7 @@ async def generate_story(request: StoryRequest, req: Request):
         logger.info(f"Request ID: {request_id} - Starting story generation")
         logger.info(f"Request ID: {request_id} - Prompt: {request.prompt[:100]}...")
         
-        # STEP 1: Generate the story using GPT-3.5-turbo
+        # Generate story
         story_start_time = time.time()
         if not request.prompt.strip():
             logger.info(f"Request ID: {request_id} - Using default prompt")
@@ -171,13 +172,13 @@ async def generate_story(request: StoryRequest, req: Request):
                 "Make the story cute and interesting, with animals, toys, or magical things. "
                 "Add some gentle humor and surprises to keep children engaged. "
                 "The story should be under 100 words and feel like it's meant to be read aloud to a small child. "
-                "Always end the story with 'The End!' on a new line. "
+                "Always end the story with 'The End! (Created By - MyStoryBuddy)' on a new line. "
                 "Format your response exactly like this:\n"
                 "Title: [Your Title]\n\n"
                 "[First paragraph of the story]\n\n"
                 "[Second paragraph of the story]\n\n"
                 "[Third paragraph of the story]\n\n"
-                "The End!\n\n"
+                "The End! (Created By - MyStoryBuddy)\n\n"
                 "Use double line breaks between paragraphs. Keep paragraphs short and engaging."
             )
             user_prompt = "Create a delightful story for young children"
@@ -205,9 +206,9 @@ async def generate_story(request: StoryRequest, req: Request):
             )
             user_prompt = request.prompt
 
-        logger.info(f"Request ID: {request_id} - Generating story with GPT-3.5-turbo...")
+        logger.info(f"Request ID: {request_id} - Generating story with GPT-4.1...")
         story_response = await client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -220,7 +221,7 @@ async def generate_story(request: StoryRequest, req: Request):
         story_time = time.time() - story_start_time
         logger.info(f"Request ID: {request_id} - Story generated successfully in {story_time:.2f} seconds")
         
-        # Split the response into title and story
+        # Parse story response
         parts = content.split('\n\n', 1)
         if len(parts) == 2:
             title = parts[0].replace('Title:', '').strip()
@@ -232,7 +233,7 @@ async def generate_story(request: StoryRequest, req: Request):
         
         logger.info(f"Request ID: {request_id} - Title: {title}")
 
-        # STEP 2: Generate visual storytelling prompt using GPT-3.5-turbo
+        # Generate visual prompt
         visual_start_time = time.time()
         logger.info(f"Request ID: {request_id} - Generating visual prompt...")
         visual_prompt_template = f"""
@@ -241,28 +242,40 @@ Create a 4-panel comic-style illustration for a children's story titled "{title}
 Story:
 {story}
 
-Requirements:
-- Use cute, friendly characters with big eyes and gentle expressions
-- Soft pastel colors and storybook-like style
-- Each panel should advance the story
-- Include speech bubbles or short captions
-- Match this style reference: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg
+Instructions:
+- Depict the story across all 4 panels sequentially.
+- Each panel MUST have either a **caption** or a **speech bubble** that moves the story forward.
+- Use cute, friendly characters with big eyes and gentle expressions.
+- Use soft pastel colors and a storybook-like visual style.
+- Keep the tone gentle, magical, and fun.
+- Match this visual style: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg
 
-Format each panel like this:
-Panel 1: [Scene description]
-Panel 2: [Scene description]
-Panel 3: [Scene description]
-Panel 4: [Scene description]
+Format:
+Panel 1:
+Scene:
+Caption/Speech:
 
-Keep descriptions concise but include key visual elements, emotions, and actions.
+Panel 2:
+Scene:
+Caption/Speech:
+
+Panel 3:
+Scene:
+Caption/Speech:
+
+Panel 4:
+Scene:
+Caption/Speech:
+
+Ensure that the entire story is told through these four illustrated scenes with accompanying text. Be concise but expressive.
 """
         visual_response = await client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1",
             messages=[
                 {"role": "system", "content": "You are a visual storyteller for children's books. Create clear, concise panel descriptions."},
                 {"role": "user", "content": visual_prompt_template}
             ],
-            max_tokens=1000,  # Reduced from 4000 to stay within limits
+            max_tokens=1000,
             temperature=0.7
         )
         
@@ -270,7 +283,7 @@ Keep descriptions concise but include key visual elements, emotions, and actions
         visual_time = time.time() - visual_start_time
         logger.info(f"Request ID: {request_id} - Visual prompt generated successfully in {visual_time:.2f} seconds")
 
-        # STEP 3: Generate image using GPT-Image-1
+        # Generate image
         image_start_time = time.time()
         logger.info(f"Request ID: {request_id} - Generating image with GPT-Image-1...")
         image_response = await client.images.generate(
@@ -279,15 +292,15 @@ Keep descriptions concise but include key visual elements, emotions, and actions
             n=1
         )
 
-        # Get the base64 image data
         image_base64 = image_response.data[0].b64_json
         image_bytes = base64.b64decode(image_base64)
         image_time = time.time() - image_start_time
         logger.info(f"Request ID: {request_id} - Image generated successfully in {image_time:.2f} seconds")
 
-        # Save to S3 and get URL
+        # Save image and get URL
         image_url = await save_image_to_s3(image_bytes, request_id=request_id)
         
+        # Log performance metrics
         total_time = time.time() - start_time
         logger.info(f"Request ID: {request_id} - Story generation completed successfully in {total_time:.2f} seconds")
         logger.info(f"Request ID: {request_id} - Performance metrics:")
@@ -302,37 +315,14 @@ Keep descriptions concise but include key visual elements, emotions, and actions
         log_error(e, request_id)
         raise HTTPException(status_code=500, detail=str(e))
 
-# Create handler for AWS Lambda with optimized settings
-handler = Mangum(app, lifespan="off")
-
-# Add a catch-all route to handle API Gateway stage
 @app.api_route("/{path:path}", methods=["GET", "POST", "OPTIONS"])
 async def catch_all(path: str, request: Request):
-    request_id = str(uuid.uuid4())
-    log_request_details(request, request_id)
-    
-    # Handle OPTIONS request for CORS preflight
-    if request.method == "OPTIONS":
-        logger.info(f"Request ID: {request_id} - Handling OPTIONS request")
-        return {
-            "statusCode": 200,
-            "headers": {
-                "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
-                "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type,Accept",
-                "Access-Control-Max-Age": "86400"  # 24 hours
-            },
-            "body": ""
-        }
-
-    if path.startswith("default/"):
-        path = path[8:]  # Remove "default/"
-        logger.info(f"Request ID: {request_id} - Removed 'default/' prefix from path")
-    
-    if path == "generateStory":
-        logger.info(f"Request ID: {request_id} - Processing generateStory request")
+    try:
         body = await request.json()
-        return await generate_story(StoryRequest(prompt=body.get("prompt", "")), request)
-    
-    logger.warning(f"Request ID: {request_id} - Path not found: {path}")
-    raise HTTPException(status_code=404, detail="Not Found") 
+        prompt = body.get("prompt", "")
+    except json.JSONDecodeError:
+        prompt = ""
+    return await generate_story(StoryRequest(prompt=prompt), request)
+
+# Create handler for AWS Lambda
+handler = Mangum(app) 
