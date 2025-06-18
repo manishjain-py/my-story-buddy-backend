@@ -231,6 +231,17 @@ async def generate_story(request: StoryRequest, req: Request):
             title = "A Magical Story"
             story = content.strip()
         
+        # Ensure MyStoryBuddy branding is always present
+        if "(Created By - MyStoryBuddy)" not in story:
+            # Remove any existing "The End!" and add our branded version
+            if story.endswith("The End!"):
+                story = story[:-8].strip()  # Remove "The End!"
+            elif "The End!" in story:
+                story = story.replace("The End!", "").strip()
+            
+            # Add our branded ending
+            story += "\n\nThe End! (Created By - MyStoryBuddy)"
+        
         logger.info(f"Request ID: {request_id} - Title: {title}")
 
         # Generate visual prompt
