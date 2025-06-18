@@ -76,7 +76,7 @@ class StoryRequest(BaseModel):
 class StoryResponse(BaseModel):
     title: str
     story: str
-    image_url: str
+    image_urls: list[str]
 
 # Helper functions
 def cors_error_response(message: str, status_code: int = 500):
@@ -105,7 +105,7 @@ def log_error(error: Exception, request_id: str):
     logger.error(f"Error Message: {str(error)}")
     logger.error(f"Traceback: {traceback.format_exc()}")
 
-async def save_image_to_s3(image_bytes: bytes, content_type: str = "image/png", request_id: str = None) -> str:
+async def save_image_to_s3(image_bytes: bytes, content_type: str = "image/png", request_id: str = None, image_index: int = None) -> str:
     """Save image bytes to S3 and return the URL."""
     if s3_client is None:
         logger.warning(f"Request ID: {request_id} - S3 client not initialized, skipping image upload")
@@ -115,7 +115,10 @@ async def save_image_to_s3(image_bytes: bytes, content_type: str = "image/png", 
         start_time = time.time()
         logger.info(f"Request ID: {request_id} - Starting S3 upload")
         
-        object_key = f"stories/{uuid.uuid4()}.png"
+        if image_index is not None:
+            object_key = f"stories/{request_id}_image_{image_index}.png"
+        else:
+            object_key = f"stories/{uuid.uuid4()}.png"
         logger.info(f"Request ID: {request_id} - Generated object key: {object_key}")
         
         await asyncio.to_thread(
@@ -159,6 +162,100 @@ async def save_image_to_s3(image_bytes: bytes, content_type: str = "image/png", 
                 detail=f"Failed to save image: {str(e)}"
             )
 
+async def generate_story_images(story: str, title: str, request_id: str) -> list[str]:
+    """Generate 4 separate 4-panel comic images for the story and return list of URLs."""
+    image_urls = []
+    
+    # Split story into 4 parts for 4 images
+    story_paragraphs = [p.strip() for p in story.split('\n\n') if p.strip() and not p.strip().startswith('The End!')]
+    
+    # Ensure we have at least 8 paragraphs, pad if needed
+    while len(story_paragraphs) < 8:
+        if len(story_paragraphs) >= 4:
+            # Split longer paragraphs if we have at least 4
+            longest_para = max(story_paragraphs, key=len)
+            idx = story_paragraphs.index(longest_para)
+            sentences = longest_para.split('. ')
+            if len(sentences) > 1:
+                mid = len(sentences) // 2
+                part1 = '. '.join(sentences[:mid]) + '.'
+                part2 = '. '.join(sentences[mid:])
+                story_paragraphs[idx] = part1
+                story_paragraphs.insert(idx + 1, part2)
+            else:
+                story_paragraphs.append("The adventure continues...")
+        else:
+            story_paragraphs.append("The story unfolds...")
+    
+    # Group paragraphs into 4 parts (2-3 paragraphs each)
+    paragraphs_per_image = max(2, len(story_paragraphs) // 4)
+    story_parts = []
+    for i in range(4):
+        start_idx = i * paragraphs_per_image
+        end_idx = min(start_idx + paragraphs_per_image, len(story_paragraphs))
+        if i == 3:  # Last image gets remaining paragraphs
+            end_idx = len(story_paragraphs)
+        story_part = '\\n\\n'.join(story_paragraphs[start_idx:end_idx])
+        story_parts.append(story_part)
+    
+    image_titles = [
+        f"{title} - Part 1: The Beginning",
+        f"{title} - Part 2: The Adventure",
+        f"{title} - Part 3: The Challenge", 
+        f"{title} - Part 4: The Resolution"
+    ]
+    
+    for i, (story_part, image_title) in enumerate(zip(story_parts, image_titles)):
+        try:
+            logger.info(f"Request ID: {request_id} - Generating image {i+1}/4...")
+            
+            # Create visual prompt for this part
+            visual_prompt = f'''
+Create a 4-panel comic-style illustration for "{image_title}".
+
+Story part:
+{story_part}
+
+Instructions:
+- Create exactly 4 panels in a 2x2 grid layout
+- Depict this story section across all 4 panels sequentially
+- Each panel should have a caption or speech bubble that moves this part forward
+- Use cute, friendly characters with big eyes and gentle expressions
+- Use soft pastel colors and a storybook-like visual style
+- Keep the tone gentle, magical, and fun
+- Maintain character consistency with previous images if this is part 2, 3, or 4
+- Match this visual style: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg
+
+Panel Layout:
+[Panel 1] [Panel 2]
+[Panel 3] [Panel 4]
+
+Each panel should show a clear progression of the story part with engaging visuals suitable for children aged 3-5.
+'''
+            
+            # Generate the image
+            image_response = await client.images.generate(
+                model="gpt-image-1",
+                prompt=visual_prompt,
+                n=1
+            )
+            
+            image_base64 = image_response.data[0].b64_json
+            image_bytes = base64.b64decode(image_base64)
+            
+            # Save to S3 with index
+            image_url = await save_image_to_s3(image_bytes, request_id=request_id, image_index=i+1)
+            image_urls.append(image_url)
+            
+            logger.info(f"Request ID: {request_id} - Image {i+1}/4 generated and saved successfully")
+            
+        except Exception as e:
+            logger.error(f"Request ID: {request_id} - Error generating image {i+1}: {str(e)}")
+            # Add placeholder for failed image
+            image_urls.append("https://via.placeholder.com/400x300?text=Image+Generation+Failed")
+    
+    return image_urls
+
 # Routes
 @app.post("/generateStory", response_model=StoryResponse)
 async def generate_story(request: StoryRequest, req: Request):
@@ -175,46 +272,47 @@ async def generate_story(request: StoryRequest, req: Request):
         if not request.prompt.strip():
             logger.info(f"Request ID: {request_id} - Using default prompt")
             system_prompt = (
-                "You are a friendly and imaginative storyteller who creates short, fun, "
-                "and engaging stories for children aged 3 to 4. "
-                "Create a completely original and creative story that would delight young children. "
-                "Use only very simple words that a 3-year-old can understand. "
-                "Keep sentences short and clear. "
-                "Avoid any complex words or concepts. "
-                "Make the story cute and interesting, with animals, toys, or magical things. "
-                "Add some gentle humor and surprises to keep children engaged. "
-                "The story should be under 100 words and feel like it's meant to be read aloud to a small child. "
+                "You are a friendly and imaginative storyteller who creates elaborate, exciting, "
+                "and engaging stories for children aged 3 to 5 years. "
+                "Create a completely original and creative adventure story with fun elements, "
+                "twists and turns that would delight and excite young children. "
+                "Use simple words that a 3-5 year old can understand. "
+                "Keep sentences short and clear but create an exciting narrative arc. "
+                "Include characters that go on adventures, face challenges, and discover wonderful things. "
+                "Make the story fun and interesting, with animals, toys, magical creatures, or fantasy elements. "
+                "Add gentle humor, surprises, and exciting moments to keep children engaged throughout. "
+                "The story should be approximately 200-250 words and feel like an exciting adventure "
+                "meant to be read aloud to young children. "
+                "Include multiple scenes and story progression with clear beginning, middle, and end. "
                 "Always end the story with 'The End! (Created By - MyStoryBuddy)' on a new line. "
                 "Format your response exactly like this:\n"
                 "Title: [Your Title]\n\n"
-                "[First paragraph of the story]\n\n"
-                "[Second paragraph of the story]\n\n"
-                "[Third paragraph of the story]\n\n"
+                "[Story content with multiple paragraphs]\n\n"
                 "The End! (Created By - MyStoryBuddy)\n\n"
-                "Use double line breaks between paragraphs. Keep paragraphs short and engaging."
+                "Use double line breaks between paragraphs. Create 8-12 paragraphs to tell the full adventure."
             )
             user_prompt = "Create a delightful story for young children"
         else:
             logger.info(f"Request ID: {request_id} - Using custom prompt")
             system_prompt = (
-                "You are a friendly and imaginative storyteller who creates short, fun, "
-                "and engaging stories for children aged 3 to 4. "
-                "Use only very simple words that a 3-year-old can understand. "
-                "Keep sentences short and clear. "
-                "Avoid any complex words or concepts. "
-                "If the story is based on a concept (like kindness, sharing, or brushing teeth), "
-                "explain it through a fun story, not like a lesson. "
-                "Make the story cute and interesting, with animals, toys, or magical things if possible. "
-                "Add some gentle humor and surprises to keep children engaged. "
-                "The story should be under 100 words and feel like it's meant to be read aloud to a small child. "
-                "Always end the story with 'The End!' on a new line. "
+                "You are a friendly and imaginative storyteller who creates elaborate, exciting, "
+                "and engaging stories for children aged 3 to 5 years. "
+                "Use simple words that a 3-5 year old can understand. "
+                "Keep sentences short and clear but create an exciting narrative arc. "
+                "Include characters that go on adventures, face challenges, and discover wonderful things. "
+                "If the story is based on a concept (like kindness, sharing, or friendship), "
+                "weave it into an exciting adventure story, not like a lesson. "
+                "Make the story fun and interesting, with animals, toys, magical creatures, or fantasy elements. "
+                "Add gentle humor, surprises, and exciting moments to keep children engaged throughout. "
+                "The story should be approximately 200-250 words and feel like an exciting adventure "
+                "meant to be read aloud to young children. "
+                "Include multiple scenes and story progression with clear beginning, middle, and end. "
+                "Always end the story with 'The End! (Created By - MyStoryBuddy)' on a new line. "
                 "Format your response exactly like this:\n"
                 "Title: [Your Title]\n\n"
-                "[First paragraph of the story]\n\n"
-                "[Second paragraph of the story]\n\n"
-                "[Third paragraph of the story]\n\n"
-                "The End!\n\n"
-                "Use double line breaks between paragraphs. Keep paragraphs short and engaging."
+                "[Story content with multiple paragraphs]\n\n"
+                "The End! (Created By - MyStoryBuddy)\n\n"
+                "Use double line breaks between paragraphs. Create 8-12 paragraphs to tell the full adventure."
             )
             user_prompt = request.prompt
 
@@ -225,7 +323,7 @@ async def generate_story(request: StoryRequest, req: Request):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=300,
+            max_tokens=500,
             temperature=0.7
         )
         
@@ -256,87 +354,26 @@ async def generate_story(request: StoryRequest, req: Request):
         
         logger.info(f"Request ID: {request_id} - Title: {title}")
 
-        # Generate visual prompt
-        visual_start_time = time.time()
-        logger.info(f"Request ID: {request_id} - Generating visual prompt...")
-        visual_prompt_template = f"""
-Create a 4-panel comic-style illustration for a children's story titled "{title}".
-
-Story:
-{story}
-
-Instructions:
-- Depict the story across all 4 panels sequentially.
-- Each panel MUST have either a **caption** or a **speech bubble** that moves the story forward.
-- Use cute, friendly characters with big eyes and gentle expressions.
-- Use soft pastel colors and a storybook-like visual style.
-- Keep the tone gentle, magical, and fun.
-- Match this visual style: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg
-
-Format:
-Panel 1:
-Scene:
-Caption/Speech:
-
-Panel 2:
-Scene:
-Caption/Speech:
-
-Panel 3:
-Scene:
-Caption/Speech:
-
-Panel 4:
-Scene:
-Caption/Speech:
-
-Ensure that the entire story is told through these four illustrated scenes with accompanying text. Be concise but expressive.
-"""
-        visual_response = await client.chat.completions.create(
-            model="gpt-4.1",
-            messages=[
-                {"role": "system", "content": "You are a visual storyteller for children's books. Create clear, concise panel descriptions."},
-                {"role": "user", "content": visual_prompt_template}
-            ],
-            max_tokens=1000,
-            temperature=0.7
-        )
-        
-        final_image_prompt = visual_response.choices[0].message.content
-        visual_time = time.time() - visual_start_time
-        logger.info(f"Request ID: {request_id} - Visual prompt generated successfully in {visual_time:.2f} seconds")
-
-        # Generate image
-        image_start_time = time.time()
-        logger.info(f"Request ID: {request_id} - Generating image with GPT-Image-1...")
-        image_response = await client.images.generate(
-            model="gpt-image-1",
-            prompt=final_image_prompt,
-            n=1
-        )
-
-        image_base64 = image_response.data[0].b64_json
-        image_bytes = base64.b64decode(image_base64)
-        image_time = time.time() - image_start_time
-        logger.info(f"Request ID: {request_id} - Image generated successfully in {image_time:.2f} seconds")
-
-        # Save image and get URL
-        image_url = await save_image_to_s3(image_bytes, request_id=request_id)
+        # Generate multiple images
+        images_start_time = time.time()
+        logger.info(f"Request ID: {request_id} - Generating 4 comic images...")
+        image_urls = await generate_story_images(story, title, request_id)
+        images_time = time.time() - images_start_time
+        logger.info(f"Request ID: {request_id} - All 4 images generated successfully in {images_time:.2f} seconds")
         
         # Log performance metrics
         total_time = time.time() - start_time
         logger.info(f"Request ID: {request_id} - Story generation completed successfully in {total_time:.2f} seconds")
         logger.info(f"Request ID: {request_id} - Performance metrics:")
         logger.info(f"  - Story generation: {story_time:.2f}s")
-        logger.info(f"  - Visual prompt: {visual_time:.2f}s")
-        logger.info(f"  - Image generation: {image_time:.2f}s")
+        logger.info(f"  - Images generation: {images_time:.2f}s")
         logger.info(f"  - Total time: {total_time:.2f}s")
 
         return JSONResponse(
             content={
                 "title": title,
                 "story": story,
-                "image_url": image_url
+                "image_urls": image_urls
             },
             headers={
                 "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
