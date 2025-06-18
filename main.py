@@ -12,6 +12,7 @@ import httpx
 import boto3
 import botocore
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import AsyncOpenAI
@@ -320,20 +321,62 @@ Ensure that the entire story is told through these four illustrated scenes with 
         logger.info(f"  - Image generation: {image_time:.2f}s")
         logger.info(f"  - Total time: {total_time:.2f}s")
 
-        return StoryResponse(title=title, story=story, image_url=image_url)
+        return JSONResponse(
+            content={
+                "title": title,
+                "story": story,
+                "image_url": image_url
+            },
+            headers={
+                "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
         
     except Exception as e:
         log_error(e, request_id)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.options("/generateStory")
+async def preflight_generateStory():
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
+
 @app.api_route("/{path:path}", methods=["GET", "POST", "OPTIONS"])
 async def catch_all(path: str, request: Request):
+    # Handle OPTIONS preflight for any path
+    if request.method == "OPTIONS":
+        return JSONResponse(
+            content={},
+            headers={
+                "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+    
     try:
         body = await request.json()
         prompt = body.get("prompt", "")
     except json.JSONDecodeError:
         prompt = ""
-    return await generate_story(StoryRequest(prompt=prompt), request)
+
+    response = await generate_story(StoryRequest(prompt=prompt), request)
+    return JSONResponse(
+        content=response.content,
+        headers={
+            "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
 
 # Create handler for AWS Lambda
 handler = Mangum(app) 
