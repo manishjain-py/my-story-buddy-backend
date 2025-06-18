@@ -79,6 +79,17 @@ class StoryResponse(BaseModel):
     image_url: str
 
 # Helper functions
+def cors_error_response(message: str, status_code: int = 500):
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": message},
+        headers={
+            "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
+
 def log_request_details(request: Request, request_id: str):
     """Log detailed information about the incoming request."""
     logger.info(f"Request ID: {request_id}")
@@ -336,7 +347,7 @@ Ensure that the entire story is told through these four illustrated scenes with 
         
     except Exception as e:
         log_error(e, request_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        return cors_error_response(str(e))
 
 @app.options("/generateStory")
 async def preflight_generateStory():
@@ -368,15 +379,7 @@ async def catch_all(path: str, request: Request):
     except json.JSONDecodeError:
         prompt = ""
 
-    response = await generate_story(StoryRequest(prompt=prompt), request)
-    return JSONResponse(
-        content=response.content,
-        headers={
-            "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "*"
-        }
-    )
+    return await generate_story(StoryRequest(prompt=prompt), request)
 
 # Create handler for AWS Lambda
 handler = Mangum(app) 
