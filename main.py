@@ -249,6 +249,10 @@ async def generate_story_images(story: str, title: str, request_id: str, origina
         f"{title} - Part 4: The Resolution"
     ]
     
+    # Generate a shared character design guide for consistency
+    logger.info(f"Request ID: {request_id} - Generating character consistency guide...")
+    consistency_start_time = time.time()
+    
     # Check for personalized characters
     personalization_note = ""
     if "aadyu" in original_prompt.lower() or "aadyu" in story.lower():
@@ -259,122 +263,121 @@ Aadyu should be depicted as a young boy who is funny, creative, and very smart.
 Reference this character design: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/personalised/aadyu.PNG
 Make Aadyu a central figure in the panels, showing his personality through expressions and actions.
 '''
-
-    # Create the unified 4-panel comic prompt
-    logger.info(f"Request ID: {request_id} - Generating unified 4-panel comic...")
-    unified_start_time = time.time()
     
-    # Format story parts for the prompt
-    story_parts_text = ""
-    for i, (story_part, image_title) in enumerate(zip(story_parts, image_titles)):
-        story_parts_text += f"\nPanel {i+1} - {image_title.split(' - ', 1)[1]}:\n{story_part}\n"
+    consistency_system_prompt = (
+        "You are an expert comic book artist. Create a detailed character and visual style guide "
+        "that will ensure perfect consistency across multiple comic panels. "
+        "Focus on character descriptions, color palette, and art style that must remain identical."
+    )
     
-    unified_visual_prompt = f'''
-Create a single comic page with 4 quadrants arranged in a 2x2 grid for "{title}".
+    consistency_response = await client.chat.completions.create(
+        model="gpt-4.1",
+        messages=[
+            {"role": "system", "content": consistency_system_prompt},
+            {"role": "user", "content": f"Create a visual consistency guide for this story:\n\n{story}{personalization_note}"}
+        ],
+        max_tokens=400,
+        temperature=0.2
+    )
+    
+    character_guide = consistency_response.choices[0].message.content
+    consistency_time = time.time() - consistency_start_time
+    logger.info(f"Request ID: {request_id} - Character guide generated in {consistency_time:.2f} seconds")
 
-STORY BREAKDOWN:
-{story_parts_text}
+    # Generate all 4 images in parallel with consistency guide
+    logger.info(f"Request ID: {request_id} - Generating 4 comic images in parallel...")
+    parallel_start_time = time.time()
+    
+    async def generate_single_image(index: int, story_part: str, image_title: str) -> tuple[int, str]:
+        """Generate a single 4-panel comic image."""
+        try:
+            logger.info(f"Request ID: {request_id} - Starting generation for image {index+1}/4...")
+            
+            visual_prompt = f'''
+Create a 4-panel comic-style illustration for "{image_title}".
 
-OVERALL LAYOUT REQUIREMENTS:
-- Create a 2x2 grid of quadrants: 
-  [Quadrant 1: Part 1] [Quadrant 2: Part 2]
-  [Quadrant 3: Part 3] [Quadrant 4: Part 4]
-- Each quadrant should be the same size and clearly separated by thick black borders
-- The overall image should be square or slightly rectangular
-- Each quadrant contains a complete 4-panel comic for that story part
+STORY CONTENT:
+{story_part}
 
-QUADRANT LAYOUT (within each quadrant):
-Each quadrant should contain exactly 4 panels in a 2x2 arrangement:
-[Panel 1] [Panel 2]
-[Panel 3] [Panel 4]
+CHARACTER & STYLE CONSISTENCY GUIDE:
+{character_guide}
 
-VISUAL STYLE:
+CRITICAL: Follow the consistency guide exactly to ensure this image matches the other 3 comic images in the series.
+
+LAYOUT:
+- Create exactly 4 panels in a 2x2 grid layout
+- Panel arrangement: [Panel 1] [Panel 2]
+                     [Panel 3] [Panel 4]
+- Each panel progresses the story part sequentially
+
+VISUAL REQUIREMENTS:
+- IDENTICAL character designs as specified in the consistency guide
+- SAME art style, colors, and visual elements as the guide
 - Use cute, friendly characters with big eyes and gentle expressions
-- Use soft pastel colors and a storybook-like visual style
-- Keep the tone gentle, magical, and fun
-- Maintain perfect character consistency across ALL quadrants and panels
-- Match this visual style: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg{personalization_note}
+- Soft pastel colors and storybook-like visual style
+- Keep tone gentle, magical, and fun
+- Match this reference style: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg{personalization_note}
 
-QUADRANT CONTENT:
-Quadrant 1 (Top-Left): {story_parts[0]} (Setup and introduction) - Show this story part across 4 panels
-Quadrant 2 (Top-Right): {story_parts[1]} (Development and adventure) - Show this story part across 4 panels
-Quadrant 3 (Bottom-Left): {story_parts[2]} (Challenge or climax) - Show this story part across 4 panels
-Quadrant 4 (Bottom-Right): {story_parts[3]} (Resolution and conclusion) - Show this story part across 4 panels
-
-TECHNICAL REQUIREMENTS:
-- Each quadrant tells one complete story part across its 4 panels
+STORY PROGRESSION:
+- Show this story section across all 4 panels
 - Include speech bubbles or captions where appropriate
-- Ensure smooth visual flow within each quadrant and between quadrants
-- Characters must look identical across all quadrants and panels
-- Clear black borders between quadrants for easy splitting
-- Suitable for children aged 3-5
+- Clear visual storytelling suitable for children aged 3-5
+- Maintain narrative flow within the 4 panels
 
-Create this as a single 2x2 grid image that can be split into 4 individual comic pages.
+CONSISTENCY REMINDER: This is part {index+1} of 4 in a series - characters and style must be identical to other parts.
 '''
-
-    try:
-        # Generate the unified comic image
-        logger.info(f"Request ID: {request_id} - Calling GPT-Image-1 for unified comic generation...")
-        image_response = await client.images.generate(
-            model="gpt-image-1",
-            prompt=unified_visual_prompt,
-            n=1
-        )
-        
-        image_base64 = image_response.data[0].b64_json
-        image_bytes = base64.b64decode(image_base64)
-        unified_time = time.time() - unified_start_time
-        
-        logger.info(f"Request ID: {request_id} - Unified comic generated in {unified_time:.2f} seconds")
-        
-        # Process and split the image
-        logger.info(f"Request ID: {request_id} - Processing and splitting unified comic into 4 panels...")
-        split_start_time = time.time()
-        
-        # Load the image using PIL
-        image = Image.open(BytesIO(image_bytes))
-        width, height = image.size
-        
-        # Calculate quadrant dimensions (split into 2x2 grid)
-        quadrant_width = width // 2
-        quadrant_height = height // 2
-        
-        # Define quadrant positions in order: Q1 (top-left), Q2 (top-right), Q3 (bottom-left), Q4 (bottom-right)
-        quadrant_positions = [
-            (0, 0),                                        # Q1: Top-left
-            (quadrant_width, 0),                          # Q2: Top-right  
-            (0, quadrant_height),                         # Q3: Bottom-left
-            (quadrant_width, quadrant_height)             # Q4: Bottom-right
-        ]
-        
-        # Split into 4 quadrants
-        for i, (left, top) in enumerate(quadrant_positions):
-            right = left + quadrant_width
-            bottom = top + quadrant_height
             
-            # Crop the quadrant
-            quadrant = image.crop((left, top, right, bottom))
+            image_response = await client.images.generate(
+                model="gpt-image-1",
+                prompt=visual_prompt,
+                n=1
+            )
             
-            # Convert quadrant back to bytes
-            quadrant_buffer = BytesIO()
-            quadrant.save(quadrant_buffer, format='PNG')
-            quadrant_bytes = quadrant_buffer.getvalue()
+            image_base64 = image_response.data[0].b64_json
+            image_bytes = base64.b64decode(image_base64)
             
             # Save to S3
-            quadrant_url = await save_image_to_s3(quadrant_bytes, request_id=request_id, image_index=i+1)
-            image_urls.append(quadrant_url)
+            image_url = await save_image_to_s3(image_bytes, request_id=request_id, image_index=index+1)
             
-            logger.info(f"Request ID: {request_id} - Quadrant {i+1}/4 (Story Part {i+1}) processed and saved successfully")
-        
-        split_time = time.time() - split_start_time
-        logger.info(f"Request ID: {request_id} - Image splitting completed in {split_time:.2f} seconds")
-        logger.info(f"Request ID: {request_id} - Total unified comic process: {unified_time + split_time:.2f} seconds")
-        
-    except Exception as e:
-        logger.error(f"Request ID: {request_id} - Error generating unified comic: {str(e)}")
-        # Fallback to placeholder images
-        for i in range(4):
-            image_urls.append("https://via.placeholder.com/400x300?text=Comic+Generation+Failed")
+            logger.info(f"Request ID: {request_id} - Image {index+1}/4 generated and saved successfully")
+            return index, image_url
+            
+        except Exception as e:
+            logger.error(f"Request ID: {request_id} - Error generating image {index+1}: {str(e)}")
+            return index, "https://via.placeholder.com/400x300?text=Comic+Generation+Failed"
+
+    # Create tasks for all 4 images
+    tasks = [
+        generate_single_image(i, story_part, image_title) 
+        for i, (story_part, image_title) in enumerate(zip(story_parts, image_titles))
+    ]
+    
+    # Wait for all images to complete
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    parallel_time = time.time() - parallel_start_time
+    logger.info(f"Request ID: {request_id} - All 4 images generated in parallel in {parallel_time:.2f} seconds")
+    
+    # Sort results by index and extract URLs
+    image_urls = [""] * 4
+    successful_images = 0
+    
+    for result in results:
+        if isinstance(result, Exception):
+            logger.error(f"Request ID: {request_id} - Image generation task failed: {str(result)}")
+            continue
+            
+        index, url = result
+        image_urls[index] = url
+        if not url.startswith("https://via.placeholder.com"):
+            successful_images += 1
+    
+    # Fill any missing URLs with placeholders
+    for i, url in enumerate(image_urls):
+        if not url:
+            image_urls[i] = "https://via.placeholder.com/400x300?text=Comic+Generation+Failed"
+    
+    logger.info(f"Request ID: {request_id} - Successfully generated {successful_images}/4 images")
     
     return image_urls
 
