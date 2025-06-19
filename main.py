@@ -172,7 +172,7 @@ async def save_image_to_s3(image_bytes: bytes, content_type: str = "image/png", 
                 detail=f"Failed to save image: {str(e)}"
             )
 
-async def generate_story_images(story: str, title: str, request_id: str) -> list[str]:
+async def generate_story_images(story: str, title: str, request_id: str, original_prompt: str = "") -> list[str]:
     """Generate 4 separate 4-panel comic images for the story and return list of URLs."""
     image_urls = []
     
@@ -219,6 +219,17 @@ async def generate_story_images(story: str, title: str, request_id: str) -> list
         try:
             logger.info(f"Request ID: {request_id} - Generating image {i+1}/4...")
             
+            # Check for personalized characters in the story
+            personalization_note = ""
+            if "aadyu" in original_prompt.lower() or "aadyu" in story.lower():
+                personalization_note = f'''
+
+IMPORTANT PERSONALIZATION: Include Aadyu as a main character in this comic.
+Aadyu should be depicted as a young boy who is funny, creative, and very smart.
+Reference this character design: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/personalised/aadyu.PNG
+Make Aadyu a central figure in the panels, showing his personality through expressions and actions.
+'''
+
             # Create visual prompt for this part
             visual_prompt = f'''
 Create a 4-panel comic-style illustration for "{image_title}".
@@ -234,7 +245,7 @@ Instructions:
 - Use soft pastel colors and a storybook-like visual style
 - Keep the tone gentle, magical, and fun
 - Maintain character consistency with previous images if this is part 2, 3, or 4
-- Match this visual style: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg
+- Match this visual style: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg{personalization_note}
 
 Panel Layout:
 [Panel 1] [Panel 2]
@@ -304,6 +315,22 @@ async def generate_story(request: StoryRequest, req: Request):
             user_prompt = "Create a delightful story for young children"
         else:
             logger.info(f"Request ID: {request_id} - Using custom prompt")
+            
+            # Check for personalized characters
+            personalized_prompt = ""
+            original_prompt = request.prompt.lower()
+            
+            if "aadyu" in original_prompt:
+                logger.info(f"Request ID: {request_id} - Detected personalized character: Aadyu")
+                personalized_prompt = (
+                    "\n\nIMPORTANT PERSONALIZATION: This story includes Aadyu, a special character. "
+                    "Aadyu is a funny, creative, and very smart boy who loves adventures. "
+                    "Make sure to include him as a main character in the story with these personality traits. "
+                    "Show his humor through clever jokes or funny situations, his creativity through "
+                    "unique problem-solving or imaginative ideas, and his intelligence through smart "
+                    "observations or helpful solutions to challenges in the story."
+                )
+            
             system_prompt = (
                 "You are a friendly and imaginative storyteller who creates elaborate, exciting, "
                 "and engaging stories for children aged 3 to 5 years. "
@@ -323,6 +350,7 @@ async def generate_story(request: StoryRequest, req: Request):
                 "[Story content with multiple paragraphs]\n\n"
                 "The End! (Created By - MyStoryBuddy)\n\n"
                 "Use double line breaks between paragraphs. Create 8-12 paragraphs to tell the full adventure."
+                + personalized_prompt
             )
             user_prompt = request.prompt
 
@@ -367,7 +395,7 @@ async def generate_story(request: StoryRequest, req: Request):
         # Generate multiple images
         images_start_time = time.time()
         logger.info(f"Request ID: {request_id} - Generating 4 comic images...")
-        image_urls = await generate_story_images(story, title, request_id)
+        image_urls = await generate_story_images(story, title, request_id, request.prompt)
         images_time = time.time() - images_start_time
         logger.info(f"Request ID: {request_id} - All 4 images generated successfully in {images_time:.2f} seconds")
         
