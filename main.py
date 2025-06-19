@@ -247,14 +247,10 @@ async def generate_story_images(story: str, title: str, request_id: str, origina
         f"{title} - Part 4: The Resolution"
     ]
     
-    for i, (story_part, image_title) in enumerate(zip(story_parts, image_titles)):
-        try:
-            logger.info(f"Request ID: {request_id} - Generating image {i+1}/4...")
-            
-            # Check for personalized characters in the story
-            personalization_note = ""
-            if "aadyu" in original_prompt.lower() or "aadyu" in story.lower():
-                personalization_note = f'''
+    # Check for personalized characters once
+    personalization_note = ""
+    if "aadyu" in original_prompt.lower() or "aadyu" in story.lower():
+        personalization_note = f'''
 
 IMPORTANT PERSONALIZATION: Include Aadyu as a main character in this comic.
 Aadyu should be depicted as a young boy who is funny, creative, and very smart.
@@ -262,21 +258,60 @@ Reference this character design: https://mystorybuddy-assets.s3.us-east-1.amazon
 Make Aadyu a central figure in the panels, showing his personality through expressions and actions.
 '''
 
-            # Create visual prompt for this part
-            visual_prompt = f'''
+    # Generate a consistent character and style description for all images
+    logger.info(f"Request ID: {request_id} - Generating character and style consistency guide...")
+    consistency_start_time = time.time()
+    
+    consistency_system_prompt = (
+        "You are an expert comic book artist and character designer. "
+        "Based on the story provided, create a detailed visual consistency guide that will ensure "
+        "all comic panels have the same characters, art style, and visual elements. "
+        "This guide will be used for generating 4 separate comic images that must look like they belong to the same story."
+        "\n\n"
+        "Format your response as a detailed visual description including:\n"
+        "1. CHARACTER DESCRIPTIONS: Detailed appearance of each main character\n"
+        "2. ART STYLE: Specific artistic style, colors, and visual elements\n"
+        "3. SETTING DETAILS: Environment, background elements, and atmosphere\n"
+        "4. VISUAL CONSISTENCY RULES: What must remain the same across all panels\n"
+        "\n"
+        "Be very specific about character features, clothing, colors, and artistic style."
+    )
+    
+    consistency_response = await client.chat.completions.create(
+        model="gpt-4.1",
+        messages=[
+            {"role": "system", "content": consistency_system_prompt},
+            {"role": "user", "content": f"Create a visual consistency guide for this story:\n\n{story}{personalization_note}"}
+        ],
+        max_tokens=600,
+        temperature=0.2  # Lower temperature for more consistent descriptions
+    )
+    
+    visual_consistency_guide = consistency_response.choices[0].message.content
+    consistency_time = time.time() - consistency_start_time
+    logger.info(f"Request ID: {request_id} - Visual consistency guide generated in {consistency_time:.2f} seconds")
+
+    # Create all visual prompts with consistency guide
+    visual_prompts = []
+    for i, (story_part, image_title) in enumerate(zip(story_parts, image_titles)):
+        visual_prompt = f'''
 Create a 4-panel comic-style illustration for "{image_title}".
 
 Story part:
 {story_part}
 
+VISUAL CONSISTENCY REQUIREMENTS:
+{visual_consistency_guide}
+
+CRITICAL: Follow the visual consistency guide exactly to ensure all 4 comic images look like they belong to the same story series. Pay special attention to character appearance, art style, and color palette.
+
 Instructions:
 - Create exactly 4 panels in a 2x2 grid layout
 - Depict this story section across all 4 panels sequentially
 - Each panel should have a caption or speech bubble that moves this part forward
-- Use cute, friendly characters with big eyes and gentle expressions
-- Use soft pastel colors and a storybook-like visual style
+- MAINTAIN EXACT CHARACTER CONSISTENCY: Use the same character designs across all panels
+- MAINTAIN ART STYLE CONSISTENCY: Use the exact same artistic style and color palette
 - Keep the tone gentle, magical, and fun
-- Maintain character consistency with previous images if this is part 2, 3, or 4
 - Match this visual style: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg{personalization_note}
 
 Panel Layout:
@@ -284,12 +319,23 @@ Panel Layout:
 [Panel 3] [Panel 4]
 
 Each panel should show a clear progression of the story part with engaging visuals suitable for children aged 3-5.
+
+REMINDER: This is part {i+1} of 4 in a series - ensure visual continuity with the consistency guide above.
 '''
+        visual_prompts.append(visual_prompt)
+
+    # Generate all images in parallel
+    logger.info(f"Request ID: {request_id} - Generating all 4 images in parallel...")
+    parallel_start_time = time.time()
+    
+    async def generate_single_image(index: int, prompt: str) -> tuple[int, str]:
+        """Generate a single image and return its index and URL."""
+        try:
+            logger.info(f"Request ID: {request_id} - Starting generation for image {index+1}/4...")
             
-            # Generate the image
             image_response = await client.images.generate(
                 model="gpt-image-1",
-                prompt=visual_prompt,
+                prompt=prompt,
                 n=1
             )
             
@@ -297,15 +343,48 @@ Each panel should show a clear progression of the story part with engaging visua
             image_bytes = base64.b64decode(image_base64)
             
             # Save to S3 with index
-            image_url = await save_image_to_s3(image_bytes, request_id=request_id, image_index=i+1)
-            image_urls.append(image_url)
+            image_url = await save_image_to_s3(image_bytes, request_id=request_id, image_index=index+1)
             
-            logger.info(f"Request ID: {request_id} - Image {i+1}/4 generated and saved successfully")
+            logger.info(f"Request ID: {request_id} - Image {index+1}/4 generated and saved successfully")
+            return index, image_url
             
         except Exception as e:
-            logger.error(f"Request ID: {request_id} - Error generating image {i+1}: {str(e)}")
-            # Add placeholder for failed image
-            image_urls.append("https://via.placeholder.com/400x300?text=Image+Generation+Failed")
+            logger.error(f"Request ID: {request_id} - Error generating image {index+1}: {str(e)}")
+            # Return placeholder for failed image
+            return index, "https://via.placeholder.com/400x300?text=Image+Generation+Failed"
+
+    # Create tasks for all 4 images
+    tasks = [
+        generate_single_image(i, prompt) 
+        for i, prompt in enumerate(visual_prompts)
+    ]
+    
+    # Wait for all images to complete
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    parallel_time = time.time() - parallel_start_time
+    logger.info(f"Request ID: {request_id} - All 4 images generated in parallel in {parallel_time:.2f} seconds")
+    
+    # Sort results by index and extract URLs
+    image_urls = [""] * 4  # Initialize with correct size
+    successful_images = 0
+    
+    for result in results:
+        if isinstance(result, Exception):
+            logger.error(f"Request ID: {request_id} - Image generation task failed: {str(result)}")
+            continue
+            
+        index, url = result
+        image_urls[index] = url
+        if not url.startswith("https://via.placeholder.com"):
+            successful_images += 1
+    
+    # Fill any missing URLs with placeholders
+    for i, url in enumerate(image_urls):
+        if not url:
+            image_urls[i] = "https://via.placeholder.com/400x300?text=Image+Generation+Failed"
+    
+    logger.info(f"Request ID: {request_id} - Successfully generated {successful_images}/4 images")
     
     return image_urls
 
