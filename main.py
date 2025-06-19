@@ -176,37 +176,69 @@ async def generate_story_images(story: str, title: str, request_id: str, origina
     """Generate 4 separate 4-panel comic images for the story and return list of URLs."""
     image_urls = []
     
-    # Split story into 4 parts for 4 images
-    story_paragraphs = [p.strip() for p in story.split('\n\n') if p.strip() and not p.strip().startswith('The End!')]
+    # Use LLM to intelligently break down the story into 4 comic parts
+    logger.info(f"Request ID: {request_id} - Breaking down story into 4 comic parts...")
+    breakdown_start_time = time.time()
     
-    # Ensure we have at least 8 paragraphs, pad if needed
-    while len(story_paragraphs) < 8:
-        if len(story_paragraphs) >= 4:
-            # Split longer paragraphs if we have at least 4
-            longest_para = max(story_paragraphs, key=len)
-            idx = story_paragraphs.index(longest_para)
-            sentences = longest_para.split('. ')
-            if len(sentences) > 1:
-                mid = len(sentences) // 2
-                part1 = '. '.join(sentences[:mid]) + '.'
-                part2 = '. '.join(sentences[mid:])
-                story_paragraphs[idx] = part1
-                story_paragraphs.insert(idx + 1, part2)
-            else:
-                story_paragraphs.append("The adventure continues...")
-        else:
-            story_paragraphs.append("The story unfolds...")
+    breakdown_system_prompt = (
+        "You are an expert in comic storytelling and visual narrative structure. "
+        "Break down the given story into exactly 4 meaningful parts for a 4-panel comic series. "
+        "Each part should represent a clear story beat that works well visually. "
+        "Follow classic story structure: Setup, Development, Climax, Resolution. "
+        "\n\n"
+        "Format your response as exactly 4 parts separated by '---PART BREAK---' like this:\n"
+        "Part 1 content here\n"
+        "---PART BREAK---\n"
+        "Part 2 content here\n"
+        "---PART BREAK---\n" 
+        "Part 3 content here\n"
+        "---PART BREAK---\n"
+        "Part 4 content here\n"
+        "\n"
+        "Guidelines:\n"
+        "- Part 1: Introduction and setup (characters, setting, initial situation)\n"
+        "- Part 2: Development and adventure beginning (action starts, journey begins)\n"
+        "- Part 3: Challenge or climax (main conflict, problem to solve, exciting moment)\n"
+        "- Part 4: Resolution and conclusion (problem solved, happy ending)\n"
+        "- Each part should be visually interesting and work well as a comic panel\n"
+        "- Maintain the story's flow and key plot points\n"
+        "- Keep the language and tone appropriate for children aged 3-5"
+    )
     
-    # Group paragraphs into 4 parts (2-3 paragraphs each)
-    paragraphs_per_image = max(2, len(story_paragraphs) // 4)
-    story_parts = []
-    for i in range(4):
-        start_idx = i * paragraphs_per_image
-        end_idx = min(start_idx + paragraphs_per_image, len(story_paragraphs))
-        if i == 3:  # Last image gets remaining paragraphs
-            end_idx = len(story_paragraphs)
-        story_part = '\\n\\n'.join(story_paragraphs[start_idx:end_idx])
-        story_parts.append(story_part)
+    breakdown_response = await client.chat.completions.create(
+        model="gpt-4.1",
+        messages=[
+            {"role": "system", "content": breakdown_system_prompt},
+            {"role": "user", "content": f"Break down this story into 4 comic parts:\n\n{story}"}
+        ],
+        max_tokens=800,
+        temperature=0.3
+    )
+    
+    breakdown_content = breakdown_response.choices[0].message.content
+    breakdown_time = time.time() - breakdown_start_time
+    logger.info(f"Request ID: {request_id} - Story breakdown completed in {breakdown_time:.2f} seconds")
+    
+    # Parse the breakdown response
+    story_parts = breakdown_content.split('---PART BREAK---')
+    story_parts = [part.strip() for part in story_parts if part.strip()]
+    
+    # Ensure we have exactly 4 parts
+    if len(story_parts) != 4:
+        logger.warning(f"Request ID: {request_id} - Expected 4 story parts, got {len(story_parts)}. Using fallback breakdown.")
+        # Fallback to simple paragraph-based breakdown
+        story_paragraphs = [p.strip() for p in story.split('\n\n') if p.strip() and not p.strip().startswith('The End!')]
+        paragraphs_per_part = max(1, len(story_paragraphs) // 4)
+        story_parts = []
+        for i in range(4):
+            start_idx = i * paragraphs_per_part
+            end_idx = min(start_idx + paragraphs_per_part, len(story_paragraphs))
+            if i == 3:  # Last part gets remaining paragraphs
+                end_idx = len(story_paragraphs)
+            story_part = '\n\n'.join(story_paragraphs[start_idx:end_idx])
+            story_parts.append(story_part)
+    
+    logger.info(f"Request ID: {request_id} - Successfully created {len(story_parts)} story parts for comic generation")
     
     image_titles = [
         f"{title} - Part 1: The Beginning",
