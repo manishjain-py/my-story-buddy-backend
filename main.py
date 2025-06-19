@@ -270,38 +270,46 @@ Make Aadyu a central figure in the panels, showing his personality through expre
         story_parts_text += f"\nPanel {i+1} - {image_title.split(' - ', 1)[1]}:\n{story_part}\n"
     
     unified_visual_prompt = f'''
-Create a single horizontal 4-panel comic strip for "{title}".
+Create a single comic page with 4 quadrants arranged in a 2x2 grid for "{title}".
 
 STORY BREAKDOWN:
 {story_parts_text}
 
-LAYOUT REQUIREMENTS:
-- Create exactly 4 panels arranged horizontally side by side: [Panel 1] [Panel 2] [Panel 3] [Panel 4]
-- Each panel should be the same size and clearly separated by thin black borders
-- The overall image should be in landscape/horizontal format
-- Each panel tells one part of the story in sequence from left to right
+OVERALL LAYOUT REQUIREMENTS:
+- Create a 2x2 grid of quadrants: 
+  [Quadrant 1: Part 1] [Quadrant 2: Part 2]
+  [Quadrant 3: Part 3] [Quadrant 4: Part 4]
+- Each quadrant should be the same size and clearly separated by thick black borders
+- The overall image should be square or slightly rectangular
+- Each quadrant contains a complete 4-panel comic for that story part
+
+QUADRANT LAYOUT (within each quadrant):
+Each quadrant should contain exactly 4 panels in a 2x2 arrangement:
+[Panel 1] [Panel 2]
+[Panel 3] [Panel 4]
 
 VISUAL STYLE:
 - Use cute, friendly characters with big eyes and gentle expressions
 - Use soft pastel colors and a storybook-like visual style
 - Keep the tone gentle, magical, and fun
-- Maintain perfect character consistency across all 4 panels
+- Maintain perfect character consistency across ALL quadrants and panels
 - Match this visual style: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg{personalization_note}
 
-PANEL CONTENT:
-Panel 1: {story_parts[0]} (Setup and introduction)
-Panel 2: {story_parts[1]} (Development and adventure)  
-Panel 3: {story_parts[2]} (Challenge or climax)
-Panel 4: {story_parts[3]} (Resolution and conclusion)
+QUADRANT CONTENT:
+Quadrant 1 (Top-Left): {story_parts[0]} (Setup and introduction) - Show this story part across 4 panels
+Quadrant 2 (Top-Right): {story_parts[1]} (Development and adventure) - Show this story part across 4 panels
+Quadrant 3 (Bottom-Left): {story_parts[2]} (Challenge or climax) - Show this story part across 4 panels
+Quadrant 4 (Bottom-Right): {story_parts[3]} (Resolution and conclusion) - Show this story part across 4 panels
 
 TECHNICAL REQUIREMENTS:
-- Each panel should have clear visual storytelling
+- Each quadrant tells one complete story part across its 4 panels
 - Include speech bubbles or captions where appropriate
-- Ensure smooth visual flow from panel to panel
-- Characters must look identical across all panels
+- Ensure smooth visual flow within each quadrant and between quadrants
+- Characters must look identical across all quadrants and panels
+- Clear black borders between quadrants for easy splitting
 - Suitable for children aged 3-5
 
-Create this as a single horizontal comic strip image that can be easily split into 4 individual panels.
+Create this as a single 2x2 grid image that can be split into 4 individual comic pages.
 '''
 
     try:
@@ -327,28 +335,36 @@ Create this as a single horizontal comic strip image that can be easily split in
         image = Image.open(BytesIO(image_bytes))
         width, height = image.size
         
-        # Calculate panel dimensions (split into 4 equal horizontal sections)
-        panel_width = width // 4
-        panel_height = height
+        # Calculate quadrant dimensions (split into 2x2 grid)
+        quadrant_width = width // 2
+        quadrant_height = height // 2
         
-        # Split into 4 panels
-        for i in range(4):
-            left = i * panel_width
-            right = (i + 1) * panel_width
+        # Define quadrant positions in order: Q1 (top-left), Q2 (top-right), Q3 (bottom-left), Q4 (bottom-right)
+        quadrant_positions = [
+            (0, 0),                                        # Q1: Top-left
+            (quadrant_width, 0),                          # Q2: Top-right  
+            (0, quadrant_height),                         # Q3: Bottom-left
+            (quadrant_width, quadrant_height)             # Q4: Bottom-right
+        ]
+        
+        # Split into 4 quadrants
+        for i, (left, top) in enumerate(quadrant_positions):
+            right = left + quadrant_width
+            bottom = top + quadrant_height
             
-            # Crop the panel
-            panel = image.crop((left, 0, right, panel_height))
+            # Crop the quadrant
+            quadrant = image.crop((left, top, right, bottom))
             
-            # Convert panel back to bytes
-            panel_buffer = BytesIO()
-            panel.save(panel_buffer, format='PNG')
-            panel_bytes = panel_buffer.getvalue()
+            # Convert quadrant back to bytes
+            quadrant_buffer = BytesIO()
+            quadrant.save(quadrant_buffer, format='PNG')
+            quadrant_bytes = quadrant_buffer.getvalue()
             
             # Save to S3
-            panel_url = await save_image_to_s3(panel_bytes, request_id=request_id, image_index=i+1)
-            image_urls.append(panel_url)
+            quadrant_url = await save_image_to_s3(quadrant_bytes, request_id=request_id, image_index=i+1)
+            image_urls.append(quadrant_url)
             
-            logger.info(f"Request ID: {request_id} - Panel {i+1}/4 processed and saved successfully")
+            logger.info(f"Request ID: {request_id} - Quadrant {i+1}/4 (Story Part {i+1}) processed and saved successfully")
         
         split_time = time.time() - split_start_time
         logger.info(f"Request ID: {request_id} - Image splitting completed in {split_time:.2f} seconds")
