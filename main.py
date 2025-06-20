@@ -175,8 +175,20 @@ async def save_image_to_s3(image_bytes: bytes, content_type: str = "image/png", 
             )
 
 async def generate_story_images(story: str, title: str, request_id: str, original_prompt: str = "") -> list[str]:
-    """Generate one unified comic image and split it into 4 separate panels for perfect consistency."""
+    """Generate 4 separate 4-panel comic images for the story and return list of URLs."""
     image_urls = []
+    
+    # Check if this is a dev/testing request
+    if "(dev)" in original_prompt.lower():
+        logger.info(f"Request ID: {request_id} - Dev mode detected, returning static test images")
+        dev_image_urls = [
+            "https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/stories/f5ef3161-7410-4770-a7d3-6cdadeb21437_image_1.png",
+            "https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/stories/f5ef3161-7410-4770-a7d3-6cdadeb21437_image_2.png",
+            "https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/stories/f5ef3161-7410-4770-a7d3-6cdadeb21437_image_3.png",
+            "https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/stories/f5ef3161-7410-4770-a7d3-6cdadeb21437_image_4.png"
+        ]
+        logger.info(f"Request ID: {request_id} - Returning {len(dev_image_urls)} static dev images")
+        return dev_image_urls
     
     # Use LLM to intelligently break down the story into 4 comic parts
     logger.info(f"Request ID: {request_id} - Breaking down story into 4 comic parts...")
@@ -242,12 +254,8 @@ async def generate_story_images(story: str, title: str, request_id: str, origina
     
     logger.info(f"Request ID: {request_id} - Successfully created {len(story_parts)} story parts for comic generation")
     
-    image_titles = [
-        f"{title} - Part 1: The Beginning",
-        f"{title} - Part 2: The Adventure",
-        f"{title} - Part 3: The Challenge", 
-        f"{title} - Part 4: The Resolution"
-    ]
+    # Use the same title for all comic pages for consistency
+    image_titles = [title, title, title, title]
     
     # Generate a shared character design guide for consistency
     logger.info(f"Request ID: {request_id} - Generating character consistency guide...")
@@ -294,7 +302,7 @@ Make Aadyu a central figure in the panels, showing his personality through expre
             logger.info(f"Request ID: {request_id} - Starting generation for image {index+1}/4...")
             
             visual_prompt = f'''
-Create a 4-panel comic-style illustration for "{image_title}".
+Create a 4-panel comic-style illustration for "{title}".
 
 STORY CONTENT:
 {story_part}
@@ -308,7 +316,7 @@ LAYOUT:
 - Create exactly 4 panels in a 2x2 grid layout
 - Panel arrangement: [Panel 1] [Panel 2]
                      [Panel 3] [Panel 4]
-- Each panel progresses the story part sequentially
+- Each panel progresses the story section sequentially
 
 VISUAL REQUIREMENTS:
 - IDENTICAL character designs as specified in the consistency guide
@@ -324,7 +332,7 @@ STORY PROGRESSION:
 - Clear visual storytelling suitable for children aged 3-5
 - Maintain narrative flow within the 4 panels
 
-CONSISTENCY REMINDER: This is part {index+1} of 4 in a series - characters and style must be identical to other parts.
+CONSISTENCY REMINDER: This is image {index+1} of 4 in the story series - characters and style must be identical to other images.
 '''
             
             image_response = await client.images.generate(
