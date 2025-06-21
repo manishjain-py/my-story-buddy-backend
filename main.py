@@ -12,13 +12,20 @@ from io import BytesIO
 import httpx
 import boto3
 import botocore
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 from mangum import Mangum
 from PIL import Image
+
+# Import authentication modules
+from auth_routes import auth_router
+from google_auth import google_router
+from auth_models import UserDatabase
+from auth_utils import get_optional_user, get_current_user
+from database import db_manager
 
 # Configure logging
 logging.basicConfig(
@@ -30,12 +37,16 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI
 app = FastAPI(
-    title="Story Generator",
-    description="API for generating stories using OpenAI",
-    version="1.0.0",
+    title="My Story Buddy API",
+    description="API for generating stories and user authentication",
+    version="2.0.0",
     docs_url=None,
     redoc_url=None
 )
+
+# Include authentication routes
+app.include_router(auth_router)
+app.include_router(google_router)
 
 # Configure CORS
 app.add_middleware(
@@ -46,6 +57,40 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"]
 )
+
+# Startup event to initialize database
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database and create tables on startup"""
+    try:
+        logger.info("Starting My Story Buddy API...")
+        
+        # Initialize database connection
+        await db_manager.initialize()
+        
+        # Create all tables
+        from database import create_tables
+        await create_tables()
+        
+        # Create authentication tables
+        await UserDatabase.create_user_tables()
+        
+        logger.info("Database initialized successfully!")
+        logger.info("My Story Buddy API is ready!")
+        
+    except Exception as e:
+        logger.error(f"Startup error: {str(e)}")
+        # Don't fail startup if database is unavailable
+        logger.warning("API started without database connectivity")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    try:
+        await db_manager.close()
+        logger.info("Database connections closed")
+    except Exception as e:
+        logger.error(f"Shutdown error: {str(e)}")
 
 # Constants
 S3_BUCKET = "mystorybuddy-assets"
@@ -74,6 +119,7 @@ except Exception as e:
 # Models
 class StoryRequest(BaseModel):
     prompt: str = ""
+    formats: list[str] = ["Comic Book", "Text Story"]
 
 class StoryResponse(BaseModel):
     title: str
@@ -395,6 +441,9 @@ async def generate_story(request: StoryRequest, req: Request):
     request_id = str(uuid.uuid4())
     start_time = time.time()
     
+    # Get current user if authenticated
+    current_user = await get_optional_user(req)
+    
     try:
         log_request_details(req, request_id)
         logger.info(f"Request ID: {request_id} - Starting story generation")
@@ -511,6 +560,24 @@ async def generate_story(request: StoryRequest, req: Request):
         images_time = time.time() - images_start_time
         logger.info(f"Request ID: {request_id} - All 4 images generated successfully in {images_time:.2f} seconds")
         
+        # Save story to database
+        try:
+            from database import save_story
+            user_id = current_user["id"] if current_user else None
+            story_id = await save_story(
+                title=title,
+                story_content=story,
+                prompt=request.prompt,
+                image_urls=image_urls,
+                formats=request.formats,
+                request_id=request_id,
+                user_id=user_id
+            )
+            logger.info(f"Request ID: {request_id} - Story saved to database with ID: {story_id}")
+        except Exception as e:
+            logger.error(f"Request ID: {request_id} - Failed to save story to database: {str(e)}")
+            # Don't fail the request if database save fails
+
         # Log performance metrics
         total_time = time.time() - start_time
         logger.info(f"Request ID: {request_id} - Story generation completed successfully in {total_time:.2f} seconds")
@@ -519,12 +586,21 @@ async def generate_story(request: StoryRequest, req: Request):
         logger.info(f"  - Images generation: {images_time:.2f}s")
         logger.info(f"  - Total time: {total_time:.2f}s")
 
+        response_data = {
+            "title": title,
+            "story": story,
+            "image_urls": image_urls
+        }
+        
+        # Add user info if authenticated
+        if current_user:
+            response_data["user"] = {
+                "id": current_user["id"],
+                "first_name": current_user["first_name"]
+            }
+
         return JSONResponse(
-            content={
-                "title": title,
-                "story": story,
-                "image_urls": image_urls
-            },
+            content=response_data,
             headers={
                 "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
                 "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -540,6 +616,9 @@ async def generate_story(request: StoryRequest, req: Request):
 async def generate_fun_facts(request: FunFactRequest, req: Request):
     request_id = str(uuid.uuid4())
     start_time = time.time()
+    
+    # Get current user if authenticated
+    current_user = await get_optional_user(req)
     
     try:
         log_request_details(req, request_id)
@@ -614,6 +693,20 @@ async def generate_fun_facts(request: FunFactRequest, req: Request):
         
         logger.info(f"Request ID: {request_id} - Parsed {len(facts)} fun facts successfully")
         
+        # Save fun facts to database
+        try:
+            from database import save_fun_facts
+            facts_data = [{"question": fact.question, "answer": fact.answer} for fact in facts]
+            fun_facts_id = await save_fun_facts(
+                prompt=request.prompt,
+                facts=facts_data,
+                request_id=request_id
+            )
+            logger.info(f"Request ID: {request_id} - Fun facts saved to database with ID: {fun_facts_id}")
+        except Exception as e:
+            logger.error(f"Request ID: {request_id} - Failed to save fun facts to database: {str(e)}")
+            # Don't fail the request if database save fails
+        
         return JSONResponse(
             content={"facts": [{"question": fact.question, "answer": fact.answer} for fact in facts]},
             headers={
@@ -645,6 +738,59 @@ async def preflight_generateFunFacts():
         headers={
             "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
             "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
+
+@app.get("/my-stories")
+async def get_user_stories(current_user: dict = Depends(get_current_user)):
+    """Get all stories created by the current user."""
+    try:
+        
+        from database import get_recent_stories
+        stories = await get_recent_stories(limit=50, user_id=str(current_user["id"]))
+        
+        # Format the response
+        formatted_stories = []
+        for story in stories:
+            formatted_stories.append({
+                "id": story["id"],
+                "title": story["title"],
+                "story_content": story["story_content"],
+                "prompt": story["prompt"],
+                "image_urls": story["image_urls"] or [],
+                "formats": story["formats"] or [],
+                "created_at": story["created_at"].isoformat() if story["created_at"] else None
+            })
+        
+        return JSONResponse(
+            content={"stories": formatted_stories},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error fetching user stories: {str(e)}")
+        return JSONResponse(
+            content={"error": "Failed to fetch stories"},
+            status_code=500,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+
+@app.options("/my-stories")
+async def preflight_my_stories():
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
             "Access-Control-Allow-Headers": "*"
         }
     )

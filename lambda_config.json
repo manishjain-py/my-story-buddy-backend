@@ -1,0 +1,43 @@
+{
+    "FunctionName": "my-story-buddy",
+    "FunctionArn": "arn:aws:lambda:us-east-1:926211191776:function:my-story-buddy",
+    "Runtime": "python3.11",
+    "Role": "arn:aws:iam::926211191776:role/service-role/my-story-buddy-role-99hzouex",
+    "Handler": "main.handler",
+    "CodeSize": 14817311,
+    "Description": "",
+    "Timeout": 900,
+    "MemorySize": 128,
+    "LastModified": "2025-06-11T09:47:19.000+0000",
+    "CodeSha256": "abvhXehdoK7BlvFKrUWSjJPDPb2hChfYIoYqRuphZzc=",
+    "Version": "$LATEST",
+    "Environment": {
+        "Variables": {
+            "OPENAI_API_KEY": "PLACEHOLDER_REPLACE_WITH_ACTUAL_KEY"
+        }
+    },
+    "TracingConfig": {
+        "Mode": "PassThrough"
+    },
+    "RevisionId": "20b977b2-7edd-46a3-ac78-7cd009b2fa1f",
+    "State": "Active",
+    "LastUpdateStatus": "Successful",
+    "PackageType": "Zip",
+    "Architectures": [
+        "x86_64"
+    ],
+    "EphemeralStorage": {
+        "Size": 512
+    },
+    "SnapStart": {
+        "ApplyOn": "None",
+        "OptimizationStatus": "Off"
+    },
+    "RuntimeVersionConfig": {
+        "RuntimeVersionArn": "arn:aws:lambda:us-east-1::runtime:c58591def957dfd1fccb9de37641a84201d564903c8d08942f264cd2bd3955ca"
+    },
+    "LoggingConfig": {
+        "LogFormat": "Text",
+        "LogGroup": "/aws/lambda/my-story-buddy"
+    }
+}

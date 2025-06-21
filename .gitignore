@@ -31,4 +31,9 @@ venv/
 
 # Build files
 deployment.zip
-package/ 
+package/
+
+# Logs and config with sensitive data
+*.log
+server.log
+backend.log 
