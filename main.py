@@ -65,6 +65,23 @@ async def startup_event():
     try:
         logger.info("Starting My Story Buddy API...")
         
+        # Set Google OAuth credentials if not already set
+        if not os.getenv('GOOGLE_CLIENT_ID'):
+            os.environ['GOOGLE_CLIENT_ID'] = '61667042929-m5fsbphfu1the98ots0agfdr75pqa7c7.apps.googleusercontent.com'
+            logger.info("Google OAuth Client ID set from configuration")
+        
+        if not os.getenv('GOOGLE_CLIENT_SECRET'):
+            os.environ['GOOGLE_CLIENT_SECRET'] = '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'
+            logger.info("Google OAuth Client Secret set from configuration")
+        
+        if not os.getenv('GOOGLE_REDIRECT_URI'):
+            os.environ['GOOGLE_REDIRECT_URI'] = 'http://127.0.0.1:8003/auth/google/callback'
+            logger.info("Google OAuth Redirect URI set from configuration")
+        
+        if not os.getenv('FRONTEND_URL'):
+            os.environ['FRONTEND_URL'] = 'http://localhost:3000'
+            logger.info("Frontend URL set from configuration")
+        
         # Initialize database connection
         await db_manager.initialize()
         
