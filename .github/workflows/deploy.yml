@@ -41,7 +41,7 @@ jobs:
           cp auth_models.py deployment/
           cp auth_utils.py deployment/
           cp database.py deployment/
-          cp google_auth.py deployment/
+          # cp google_auth.py deployment/  # Temporarily disabled due to cryptography dependency
           cp email_service.py deployment/
           cd deployment
           

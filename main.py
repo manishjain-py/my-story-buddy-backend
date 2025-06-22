@@ -22,7 +22,7 @@ from PIL import Image
 
 # Import authentication modules (required for proper functionality)
 from auth_routes import auth_router
-from google_auth import google_router
+# from google_auth import google_router  # Temporarily disabled due to cryptography dependency
 from auth_models import UserDatabase
 from auth_utils import get_optional_user, get_current_user
 from database import db_manager
@@ -46,7 +46,7 @@ app = FastAPI(
 
 # Include authentication routes
 app.include_router(auth_router)
-app.include_router(google_router)
+# app.include_router(google_router)  # Temporarily disabled due to cryptography dependency
 logger.info("Authentication routes included")
 
 # Configure CORS for specific origins

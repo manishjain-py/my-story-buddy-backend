@@ -11,5 +11,5 @@ Pillow==10.0.0
 aiomysql==0.2.0
 pyjwt==2.8.0
 passlib==1.7.4
-authlib==1.2.1
+# authlib==1.2.1  # Temporarily disabled due to cryptography dependency
 itsdangerous==2.1.2 
