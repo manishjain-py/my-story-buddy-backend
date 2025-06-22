@@ -20,7 +20,7 @@ from openai import AsyncOpenAI
 from mangum import Mangum
 from PIL import Image
 
-# Import authentication modules
+# Import authentication modules (required for proper functionality)
 from auth_routes import auth_router
 from google_auth import google_router
 from auth_models import UserDatabase
@@ -47,6 +47,7 @@ app = FastAPI(
 # Include authentication routes
 app.include_router(auth_router)
 app.include_router(google_router)
+logger.info("Authentication routes included")
 
 # Configure CORS to allow all origins for now
 app.add_middleware(
@@ -58,7 +59,7 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-# Startup event to initialize database
+# Startup event to initialize database (if available)
 @app.on_event("startup")
 async def startup_event():
     """Initialize database and create tables on startup"""
@@ -82,7 +83,7 @@ async def startup_event():
             os.environ['FRONTEND_URL'] = 'http://localhost:3000'
             logger.info("Frontend URL set from configuration")
         
-        # Initialize database connection
+        # Initialize database connection (required - will fail if not available)
         await db_manager.initialize()
         
         # Create all tables
@@ -93,6 +94,7 @@ async def startup_event():
         await UserDatabase.create_user_tables()
         
         logger.info("Database initialized successfully!")
+        
         logger.info("My Story Buddy API is ready!")
         
     except Exception as e:
@@ -104,8 +106,9 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on shutdown"""
     try:
-        await db_manager.close()
-        logger.info("Database connections closed")
+        if current_user and db_manager:
+            await db_manager.close()
+            logger.info("Database connections closed")
     except Exception as e:
         logger.error(f"Shutdown error: {str(e)}")
 
@@ -458,8 +461,12 @@ async def generate_story(request: StoryRequest, req: Request):
     request_id = str(uuid.uuid4())
     start_time = time.time()
     
-    # Get current user if authenticated
-    current_user = await get_optional_user(req)
+    # Get current user if authenticated (optional)
+    current_user = None
+    try:
+        current_user = await get_optional_user(req)
+    except Exception as e:
+        logger.warning(f"Could not get user context: {e}")
     
     try:
         log_request_details(req, request_id)
@@ -577,23 +584,24 @@ async def generate_story(request: StoryRequest, req: Request):
         images_time = time.time() - images_start_time
         logger.info(f"Request ID: {request_id} - All 4 images generated successfully in {images_time:.2f} seconds")
         
-        # Save story to database
-        try:
-            from database import save_story
-            user_id = current_user["id"] if current_user else None
-            story_id = await save_story(
-                title=title,
-                story_content=story,
-                prompt=request.prompt,
-                image_urls=image_urls,
-                formats=request.formats,
-                request_id=request_id,
-                user_id=user_id
-            )
-            logger.info(f"Request ID: {request_id} - Story saved to database with ID: {story_id}")
-        except Exception as e:
-            logger.error(f"Request ID: {request_id} - Failed to save story to database: {str(e)}")
-            # Don't fail the request if database save fails
+        # Save story to database (if available)
+        if current_user and db_manager:
+            try:
+                from database import save_story
+                user_id = current_user["id"] if current_user else None
+                story_id = await save_story(
+                    title=title,
+                    story_content=story,
+                    prompt=request.prompt,
+                    image_urls=image_urls,
+                    formats=request.formats,
+                    request_id=request_id,
+                    user_id=user_id
+                )
+                logger.info(f"Request ID: {request_id} - Story saved to database with ID: {story_id}")
+            except Exception as e:
+                logger.error(f"Request ID: {request_id} - Failed to save story to database: {str(e)}")
+                # Don't fail the request if database save fails
 
         # Log performance metrics
         total_time = time.time() - start_time
@@ -634,8 +642,12 @@ async def generate_fun_facts(request: FunFactRequest, req: Request):
     request_id = str(uuid.uuid4())
     start_time = time.time()
     
-    # Get current user if authenticated
-    current_user = await get_optional_user(req)
+    # Get current user if authenticated (optional)
+    current_user = None
+    try:
+        current_user = await get_optional_user(req)
+    except Exception as e:
+        logger.warning(f"Could not get user context: {e}")
     
     try:
         log_request_details(req, request_id)
@@ -710,19 +722,20 @@ async def generate_fun_facts(request: FunFactRequest, req: Request):
         
         logger.info(f"Request ID: {request_id} - Parsed {len(facts)} fun facts successfully")
         
-        # Save fun facts to database
-        try:
-            from database import save_fun_facts
-            facts_data = [{"question": fact.question, "answer": fact.answer} for fact in facts]
-            fun_facts_id = await save_fun_facts(
-                prompt=request.prompt,
-                facts=facts_data,
-                request_id=request_id
-            )
-            logger.info(f"Request ID: {request_id} - Fun facts saved to database with ID: {fun_facts_id}")
-        except Exception as e:
-            logger.error(f"Request ID: {request_id} - Failed to save fun facts to database: {str(e)}")
-            # Don't fail the request if database save fails
+        # Save fun facts to database (if available)
+        if current_user and db_manager:
+            try:
+                from database import save_fun_facts
+                facts_data = [{"question": fact.question, "answer": fact.answer} for fact in facts]
+                fun_facts_id = await save_fun_facts(
+                    prompt=request.prompt,
+                    facts=facts_data,
+                    request_id=request_id
+                )
+                logger.info(f"Request ID: {request_id} - Fun facts saved to database with ID: {fun_facts_id}")
+            except Exception as e:
+                logger.error(f"Request ID: {request_id} - Failed to save fun facts to database: {str(e)}")
+                # Don't fail the request if database save fails
         
         return JSONResponse(
             content={"facts": [{"question": fact.question, "answer": fact.answer} for fact in facts]},
@@ -760,9 +773,75 @@ async def preflight_generateFunFacts():
     )
 
 @app.get("/my-stories")
-async def get_user_stories(current_user: dict = Depends(get_current_user)):
+async def get_user_stories(req: Request):
     """Get all stories created by the current user."""
     try:
+        # Get current user using manual header parsing
+        from fastapi.security.utils import get_authorization_scheme_param
+        
+        authorization = req.headers.get("Authorization")
+        if not authorization:
+            return JSONResponse(
+                content={"error": "Authentication required"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        scheme, token = get_authorization_scheme_param(authorization)
+        if scheme.lower() != "bearer":
+            return JSONResponse(
+                content={"error": "Invalid authentication scheme"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        # Verify JWT token
+        from auth_utils import JWTUtils
+        payload = JWTUtils.verify_token(token)
+        if payload is None:
+            return JSONResponse(
+                content={"error": "Invalid token"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        user_id = payload.get("user_id")
+        if user_id is None:
+            return JSONResponse(
+                content={"error": "Invalid token payload"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        # Get user from database
+        from auth_models import UserDatabase
+        current_user = await UserDatabase.get_user_by_id(user_id)
+        if current_user is None:
+            return JSONResponse(
+                content={"error": "User not found"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
         
         from database import get_recent_stories
         stories = await get_recent_stories(limit=50, user_id=str(current_user["id"]))

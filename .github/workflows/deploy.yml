@@ -36,6 +36,9 @@ jobs:
           mkdir -p deployment
           cp main.py deployment/
           cp requirements.txt deployment/
+          cp auth_*.py deployment/
+          cp database.py deployment/
+          cp google_auth.py deployment/
           cd deployment
           pip install -r requirements.txt -t .
           # Remove unnecessary files to reduce package size
