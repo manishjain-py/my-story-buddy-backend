@@ -10,29 +10,44 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import jwt
 from jwt.exceptions import InvalidTokenError
-from passlib.context import CryptContext
 import random
+import hashlib
+import base64
 
 # Configuration
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-super-secret-jwt-key-change-this-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30 * 24 * 60  # 30 days
 
-# Password hashing (using pbkdf2_sha256 which is Lambda-compatible)
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
-
 class PasswordUtils:
     """Utilities for password hashing and verification"""
     
     @staticmethod
     def hash_password(password: str) -> str:
-        """Hash a password using pbkdf2_sha256"""
-        return pwd_context.hash(password)
+        """Hash a password using PBKDF2-SHA256"""
+        # Generate a random salt
+        salt = secrets.token_bytes(32)
+        # Hash the password with PBKDF2
+        password_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+        # Combine salt and hash, then base64 encode
+        combined = salt + password_hash
+        return base64.b64encode(combined).decode('utf-8')
     
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
         """Verify a password against its hash"""
-        return pwd_context.verify(plain_password, hashed_password)
+        try:
+            # Decode the stored hash
+            combined = base64.b64decode(hashed_password.encode('utf-8'))
+            # Extract salt (first 32 bytes) and hash (remaining bytes)
+            salt = combined[:32]
+            stored_hash = combined[32:]
+            # Hash the provided password with the same salt
+            password_hash = hashlib.pbkdf2_hmac('sha256', plain_password.encode(), salt, 100000)
+            # Compare hashes
+            return secrets.compare_digest(stored_hash, password_hash)
+        except Exception:
+            return False
     
     @staticmethod
     def generate_random_password(length: int = 12) -> str:
