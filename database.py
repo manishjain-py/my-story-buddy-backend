@@ -46,12 +46,9 @@ class DatabaseManager:
                 minsize=1,
                 maxsize=10,
                 echo=False,
-                # Connection pool settings for better reliability
+                # Connection settings for better reliability
                 pool_recycle=3600,  # Recycle connections every hour
-                ping_interval=300,  # Ping every 5 minutes to keep connections alive
                 connect_timeout=60,  # Connection timeout
-                read_timeout=30,    # Read timeout
-                write_timeout=30    # Write timeout
             )
             
             # Test the connection
