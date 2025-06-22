@@ -11,7 +11,7 @@ Pillow==10.0.0
 aiomysql==0.2.0
 sqlalchemy==2.0.32
 asyncio-mqtt==0.16.1
-python-jose[cryptography]==3.3.0
+pyjwt==2.8.0
 passlib==1.7.4
 python-multipart==0.0.9
 email-validator==2.1.0

@@ -8,7 +8,8 @@ import secrets
 import string
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 import random
 
@@ -62,7 +63,7 @@ class JWTUtils:
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             return payload
-        except JWTError:
+        except InvalidTokenError:
             return None
     
     @staticmethod
