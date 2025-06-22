@@ -35,10 +35,14 @@ jobs:
         run: |
           mkdir -p deployment
           cp main.py deployment/
+          cp lambda_function.py deployment/ 2>/dev/null || true
           cp requirements.txt deployment/
-          cp auth_*.py deployment/
+          cp auth_routes.py deployment/
+          cp auth_models.py deployment/
+          cp auth_utils.py deployment/
           cp database.py deployment/
           cp google_auth.py deployment/
+          cp email_service.py deployment/
           cd deployment
           pip install -r requirements.txt -t .
           # Remove unnecessary files to reduce package size
