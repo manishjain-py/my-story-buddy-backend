@@ -8,7 +8,6 @@ import secrets
 import string
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
-import bcrypt
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import random
@@ -18,15 +17,15 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-super-secret-jwt-key-change-this-
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30 * 24 * 60  # 30 days
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing (using pbkdf2_sha256 which is Lambda-compatible)
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 class PasswordUtils:
     """Utilities for password hashing and verification"""
     
     @staticmethod
     def hash_password(password: str) -> str:
-        """Hash a password using bcrypt"""
+        """Hash a password using pbkdf2_sha256"""
         return pwd_context.hash(password)
     
     @staticmethod
