@@ -49,11 +49,15 @@ app.include_router(auth_router)
 app.include_router(google_router)
 logger.info("Authentication routes included")
 
-# Configure CORS to allow all origins for now
+# Configure CORS for specific origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
-    allow_credentials=False,  # Can't use credentials with wildcard
+    allow_origins=[
+        "http://localhost:5173",  # Local development
+        "https://www.mystorybuddy.com",  # Production domain
+        "https://mystorybuddy.com"  # Production domain without www
+    ],
+    allow_credentials=True,  # Allow credentials for authentication
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"]
