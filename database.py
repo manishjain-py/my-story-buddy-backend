@@ -45,7 +45,13 @@ class DatabaseManager:
                 autocommit=db_config['autocommit'],
                 minsize=1,
                 maxsize=10,
-                echo=False
+                echo=False,
+                # Connection pool settings for better reliability
+                pool_recycle=3600,  # Recycle connections every hour
+                ping_interval=300,  # Ping every 5 minutes to keep connections alive
+                connect_timeout=60,  # Connection timeout
+                read_timeout=30,    # Read timeout
+                write_timeout=30    # Write timeout
             )
             
             # Test the connection
@@ -72,6 +78,17 @@ class DatabaseManager:
                 result = await cursor.fetchone()
                 logger.info(f"Database connectivity test successful: {result}")
                 
+    async def reconnect(self):
+        """Reconnect to the database by recreating the connection pool."""
+        try:
+            logger.info("Attempting to reconnect to database...")
+            await self.close()
+            await self.initialize()
+            logger.info("Database reconnection successful")
+        except Exception as e:
+            logger.error(f"Database reconnection failed: {str(e)}")
+            raise
+    
     async def close(self):
         """Close database connection pool."""
         if self.pool:
@@ -81,15 +98,34 @@ class DatabaseManager:
             
     @asynccontextmanager
     async def get_connection(self):
-        """Get a database connection from the pool."""
+        """Get a database connection from the pool with retry logic."""
         if not self.pool:
             raise Exception("Database not initialized. Call initialize() first.")
-            
-        async with self.pool.acquire() as conn:
+        
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                yield conn
+                async with self.pool.acquire() as conn:
+                    # Test the connection before using it
+                    try:
+                        async with conn.cursor() as cursor:
+                            await cursor.execute("SELECT 1")
+                            await cursor.fetchone()
+                    except Exception as ping_error:
+                        logger.warning(f"Connection ping failed on attempt {attempt + 1}: {ping_error}")
+                        if attempt < max_retries - 1:
+                            continue
+                        raise
+                    
+                    yield conn
+                    break
             except Exception as e:
-                logger.error(f"Database operation error: {str(e)}")
+                logger.error(f"Database connection error on attempt {attempt + 1}: {str(e)}")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying database connection in 1 second...")
+                    import asyncio
+                    await asyncio.sleep(1)
+                    continue
                 raise
                 
     async def execute_query(self, query: str, params: tuple = None) -> list:
