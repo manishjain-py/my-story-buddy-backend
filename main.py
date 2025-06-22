@@ -48,17 +48,11 @@ app = FastAPI(
 app.include_router(auth_router)
 app.include_router(google_router)
 
-# Configure CORS
+# Configure CORS to allow all origins for now
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://www.mystorybuddy.com", 
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "*"  # Allow all origins for development - restrict in production
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=False,  # Can't use credentials with wildcard
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"]
