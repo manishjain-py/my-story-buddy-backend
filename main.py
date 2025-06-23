@@ -474,7 +474,7 @@ async def generate_story(request: StoryRequest, req: Request):
     
     try:
         log_request_details(req, request_id)
-        logger.info(f"Request ID: {request_id} - Starting story generation")
+        logger.info(f"Request ID: {request_id} - Starting story generation with Docker consistency")
         logger.info(f"Request ID: {request_id} - Prompt: {request.prompt[:100]}...")
         
         # Generate story
