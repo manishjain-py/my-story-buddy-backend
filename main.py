@@ -49,16 +49,11 @@ app.include_router(auth_router)
 # app.include_router(google_router)  # Temporarily disabled due to cryptography dependency
 logger.info("Authentication routes included")
 
-# Configure CORS for specific origins
+# Configure CORS - temporarily allow all origins for debugging
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Local development
-        "https://www.mystorybuddy.com",  # Production domain
-        "https://mystorybuddy.com",  # Production domain without www
-        "*"  # Temporarily allow all origins for debugging CORS issues
-    ],
-    allow_credentials=True,  # Allow credentials for authentication
+    allow_origins=["*"],  # Temporarily allow all origins for debugging CORS issues
+    allow_credentials=False,  # Must be False when using allow_origins=["*"]
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"]
