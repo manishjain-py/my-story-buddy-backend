@@ -228,3 +228,7 @@ INFO:     127.0.0.1:60091 - "OPTIONS /auth/login HTTP/1.1" 200 OK
 2025-06-23 20:07:20 - auth_routes - INFO - User login successful: manish_jain1@hotmail.com
 INFO:     127.0.0.1:60091 - "POST /auth/login HTTP/1.1" 200 OK
 INFO:     127.0.0.1:60091 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53709 - "OPTIONS /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53710 - "OPTIONS /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53709 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53710 - "GET /auth/me HTTP/1.1" 200 OK

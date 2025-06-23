@@ -55,7 +55,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",  # Local development
         "https://www.mystorybuddy.com",  # Production domain
-        "https://mystorybuddy.com"  # Production domain without www
+        "https://mystorybuddy.com",  # Production domain without www
+        "*"  # Temporarily allow all origins for debugging CORS issues
     ],
     allow_credentials=True,  # Allow credentials for authentication
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
