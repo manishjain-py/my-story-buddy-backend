@@ -48,9 +48,10 @@ jobs:
             --zip-file fileb://deployment.zip \
             --region us-west-2
           
-          # Update function configuration
+          # Update function configuration  
           aws lambda update-function-configuration \
             --function-name my-story-buddy \
+            --runtime python3.11 \
             --timeout 30 \
             --memory-size 512 \
             --environment Variables="{OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}}" \
