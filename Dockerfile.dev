@@ -1,0 +1,32 @@
+FROM public.ecr.aws/lambda/python:3.11
+
+# Override Lambda entrypoint for local development
+ENTRYPOINT []
+
+# Install system dependencies
+RUN yum update -y && yum install -y \
+    zip \
+    gcc \
+    && yum clean all
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements file
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Expose port for development
+EXPOSE 8003
+
+# Set environment variables for local development
+ENV PYTHONPATH=/app
+ENV AWS_DEFAULT_REGION=us-west-2
+
+# Command to run the application in development mode
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003", "--reload"]

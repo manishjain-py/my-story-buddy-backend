@@ -173,3 +173,58 @@ INFO:     127.0.0.1:64325 - "OPTIONS /generateFunFacts HTTP/1.1" 200 OK
 INFO:     127.0.0.1:64326 - "OPTIONS /generateStory HTTP/1.1" 200 OK
 INFO:     127.0.0.1:64326 - "POST /generateFunFacts HTTP/1.1" 403 Forbidden
 INFO:     127.0.0.1:64325 - "POST /generateStory HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:49435 - "OPTIONS /auth/login HTTP/1.1" 200 OK
+2025-06-23 19:28:32 - auth_routes - INFO - User login successful: manish_jain1@hotmail.com
+INFO:     127.0.0.1:49435 - "POST /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49435 - "OPTIONS /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49435 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49515 - "OPTIONS /generateFunFacts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49516 - "OPTIONS /generateStory HTTP/1.1" 200 OK
+2025-06-23 19:28:51 - main - INFO - Request ID: 47e80868-3db2-4919-94d6-d11cc07cba78
+2025-06-23 19:28:51 - main - INFO - Request Method: POST
+2025-06-23 19:28:51 - main - INFO - Request URL: http://127.0.0.1:8003/generateFunFacts
+2025-06-23 19:28:51 - main - INFO - Request Headers: {'host': '127.0.0.1:8003', 'connection': 'keep-alive', 'content-length': '25', 'sec-ch-ua-platform': '"macOS"', 'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo2LCJlbWFpbCI6Im1hbmlzaF9qYWluMUBob3RtYWlsLmNvbSIsImF1dGhfdHlwZSI6ImVtYWlsX3Bhc3N3b3JkIiwiZXhwIjoxNzUzMjc5MTEwfQ.QdbcCAvJ5WGzBFSMsXOgEyzJSF05Ibu8DVAKAzQeqf8', 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36', 'accept': 'application/json', 'sec-ch-ua': '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"', 'content-type': 'application/json', 'sec-ch-ua-mobile': '?0', 'origin': 'http://localhost:5173', 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty', 'referer': 'http://localhost:5173/', 'accept-encoding': 'gzip, deflate, br, zstd', 'accept-language': 'en-US,en;q=0.9'}
+2025-06-23 19:28:51 - main - INFO - Request Client: 127.0.0.1
+2025-06-23 19:28:51 - main - INFO - Request ID: 47e80868-3db2-4919-94d6-d11cc07cba78 - Starting fun facts generation
+2025-06-23 19:28:51 - main - INFO - Request ID: 47e80868-3db2-4919-94d6-d11cc07cba78 - Prompt: monkey (dev)...
+2025-06-23 19:28:51 - main - INFO - Request ID: 47e80868-3db2-4919-94d6-d11cc07cba78 - Generating fun facts with GPT-4.1...
+2025-06-23 19:28:53 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2
+2025-06-23 19:28:53 - main - INFO - Request Method: POST
+2025-06-23 19:28:53 - main - INFO - Request URL: http://127.0.0.1:8003/generateStory
+2025-06-23 19:28:53 - main - INFO - Request Headers: {'host': '127.0.0.1:8003', 'connection': 'keep-alive', 'content-length': '63', 'sec-ch-ua-platform': '"macOS"', 'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo2LCJlbWFpbCI6Im1hbmlzaF9qYWluMUBob3RtYWlsLmNvbSIsImF1dGhfdHlwZSI6ImVtYWlsX3Bhc3N3b3JkIiwiZXhwIjoxNzUzMjc5MTEwfQ.QdbcCAvJ5WGzBFSMsXOgEyzJSF05Ibu8DVAKAzQeqf8', 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36', 'accept': 'application/json', 'sec-ch-ua': '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"', 'content-type': 'application/json', 'sec-ch-ua-mobile': '?0', 'origin': 'http://localhost:5173', 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty', 'referer': 'http://localhost:5173/', 'accept-encoding': 'gzip, deflate, br, zstd', 'accept-language': 'en-US,en;q=0.9'}
+2025-06-23 19:28:53 - main - INFO - Request Client: 127.0.0.1
+2025-06-23 19:28:53 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - Starting story generation
+2025-06-23 19:28:53 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - Prompt: monkey (dev)...
+2025-06-23 19:28:53 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - Using custom prompt
+2025-06-23 19:28:53 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - Generating story with GPT-4.1...
+2025-06-23 19:28:57 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-06-23 19:28:57 - main - INFO - Request ID: 47e80868-3db2-4919-94d6-d11cc07cba78 - Fun facts generated successfully in 5.94 seconds
+2025-06-23 19:28:57 - main - INFO - Request ID: 47e80868-3db2-4919-94d6-d11cc07cba78 - Parsed 10 fun facts successfully
+2025-06-23 19:28:58 - database - INFO - Fun facts saved successfully for request_id: 47e80868-3db2-4919-94d6-d11cc07cba78
+2025-06-23 19:29:01 - main - INFO - Request ID: 47e80868-3db2-4919-94d6-d11cc07cba78 - Fun facts saved to database with ID: 12
+INFO:     127.0.0.1:49515 - "POST /generateFunFacts HTTP/1.1" 200 OK
+2025-06-23 19:29:05 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-06-23 19:29:05 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - Story generated successfully in 12.04 seconds
+2025-06-23 19:29:05 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - Title: Dev the Monkey and the Banana Balloon
+2025-06-23 19:29:05 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - Generating 4 comic images...
+2025-06-23 19:29:05 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - Dev mode detected, returning static test images
+2025-06-23 19:29:05 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - Returning 4 static dev images
+2025-06-23 19:29:05 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - All 4 images generated successfully in 0.00 seconds
+2025-06-23 19:29:07 - database - INFO - Story saved successfully for request_id: 3a9bf484-cedc-4ddc-ae8d-af45417692b2
+2025-06-23 19:29:08 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - Story saved to database with ID: 12
+2025-06-23 19:29:08 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - Story generation completed successfully in 15.16 seconds
+2025-06-23 19:29:08 - main - INFO - Request ID: 3a9bf484-cedc-4ddc-ae8d-af45417692b2 - Performance metrics:
+2025-06-23 19:29:08 - main - INFO -   - Story generation: 12.04s
+2025-06-23 19:29:08 - main - INFO -   - Images generation: 0.00s
+2025-06-23 19:29:08 - main - INFO -   - Total time: 15.16s
+INFO:     127.0.0.1:49516 - "POST /generateStory HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60091 - "OPTIONS /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60092 - "OPTIONS /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60092 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60091 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60091 - "OPTIONS /auth/logout HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60091 - "POST /auth/logout HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60091 - "OPTIONS /auth/login HTTP/1.1" 200 OK
+2025-06-23 20:07:20 - auth_routes - INFO - User login successful: manish_jain1@hotmail.com
+INFO:     127.0.0.1:60091 - "POST /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60091 - "GET /auth/me HTTP/1.1" 200 OK

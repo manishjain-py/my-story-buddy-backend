@@ -1,7 +1,10 @@
-FROM public.ecr.aws/lambda/python:3.11
+FROM --platform=linux/amd64 public.ecr.aws/lambda/python:3.11
 
-# Install zip
-RUN yum install -y zip
+# Install system dependencies
+RUN yum update -y && yum install -y \
+    zip \
+    gcc \
+    && yum clean all
 
 # Copy requirements file
 COPY requirements.txt ${LAMBDA_TASK_ROOT}
@@ -13,8 +16,5 @@ RUN pip install -r requirements.txt --target ${LAMBDA_TASK_ROOT}
 COPY main.py ${LAMBDA_TASK_ROOT}/
 COPY lambda_function.py ${LAMBDA_TASK_ROOT}/
 
-# Create deployment package
-RUN cd ${LAMBDA_TASK_ROOT} && \
-    zip -r /tmp/deployment.zip . -x "*.pyc" -x "__pycache__/*"
-
-# The deployment package will be available at /tmp/deployment.zip 
+# Set the CMD to your handler (could also be done as a parameter override outside of the Dockerfile)
+CMD ["lambda_function.lambda_handler"] 
