@@ -4,10 +4,14 @@
 
 echo "🔐 Setting up HTTPS for EC2 instance..."
 
-# Install certbot for Let's Encrypt (optional)
+# Install nginx and openssl
 echo "📦 Installing required packages..."
 sudo yum update -y
-sudo yum install -y nginx openssl
+sudo yum install -y openssl
+
+# Install nginx using Amazon Linux Extras
+echo "📦 Installing nginx using Amazon Linux Extras..."
+sudo amazon-linux-extras install -y nginx1
 
 # Create nginx configuration for HTTPS
 echo "⚙️  Creating nginx configuration..."
