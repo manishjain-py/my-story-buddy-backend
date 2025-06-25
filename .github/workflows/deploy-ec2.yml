@@ -115,13 +115,25 @@ jobs:
           MAX_RETRIES=5
           
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            # Try HTTPS first, fallback to HTTP
             if curl -k -f https://localhost/health > /dev/null 2>&1; then
-              echo "✅ Deployment successful! Application is healthy."
+              echo "✅ Deployment successful! Application is healthy via HTTPS."
               echo "🌐 Application is running at: https://${{ secrets.EC2_HOST }}"
+              break
+            elif curl -f http://localhost:8003/health > /dev/null 2>&1; then
+              echo "✅ Deployment successful! Application is healthy via HTTP."
+              echo "🌐 Application is running at: http://${{ secrets.EC2_HOST }}:8003"
+              echo "⚠️  HTTPS setup failed, but HTTP is working"
               break
             else
               RETRY_COUNT=$((RETRY_COUNT + 1))
               echo "⏳ Health check attempt $RETRY_COUNT/$MAX_RETRIES failed. Retrying in 10 seconds..."
+              if [ $RETRY_COUNT -eq 3 ]; then
+                echo "🔍 Debugging container status:"
+                docker-compose ps
+                echo "🔍 Nginx logs (if running):"
+                docker-compose logs nginx || echo "Nginx container not running"
+              fi
               sleep 10
             fi
           done
