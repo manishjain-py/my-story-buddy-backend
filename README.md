@@ -87,3 +87,4 @@ aws lambda update-function-code \
 ## License
 
 MIT # Testing automated deployment with SSH key configured
+# Fixed EC2_HOST secret for deployment
