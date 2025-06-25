@@ -115,13 +115,15 @@ async def shutdown_event():
 # Health check endpoint for Lambda testing
 @app.get("/health")
 async def health_check():
-    """Health check endpoint to verify Lambda container is working"""
+    """Health check endpoint to verify the application is working"""
     return {
         "status": "healthy",
-        "message": "My Story Buddy API is running",
+        "message": "My Story Buddy API is running with automated CI/CD",
         "timestamp": datetime.now().isoformat(),
-        "version": "2.0.0",
-        "environment": "lambda" if os.getenv("AWS_LAMBDA_FUNCTION_NAME") else "local"
+        "version": "2.1.0",
+        "environment": "ec2" if os.getenv("AWS_LAMBDA_FUNCTION_NAME") is None else "lambda",
+        "deployment": "automated-pipeline",
+        "uptime": datetime.now().isoformat()
     }
 
 @app.get("/ping")
