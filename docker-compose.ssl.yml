@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  my-story-buddy:
+    image: 926211191776.dkr.ecr.us-east-1.amazonaws.com/my-story-buddy-backend:latest
+    container_name: my-story-buddy-app
+    ports:
+      - "8003:8003"    # Only expose internal port (nginx will proxy to this)
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AWS_REGION=us-east-1
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G

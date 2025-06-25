@@ -139,7 +139,7 @@ client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Initialize S3 client
 try:
-    s3_client = boto3.client('s3', region_name=os.getenv('AWS_REGION', 'us-west-2'))
+    s3_client = boto3.client('s3', region_name=os.getenv('AWS_REGION', 'us-east-1'))
     try:
         s3_client.list_objects_v2(Bucket=S3_BUCKET, MaxKeys=1)
         logger.info(f"Successfully connected to AWS S3 bucket: {S3_BUCKET}")
@@ -226,15 +226,8 @@ async def save_image_to_s3(image_bytes: bytes, content_type: str = "image/png", 
             ContentType=content_type
         )
         
-        image_url = await asyncio.to_thread(
-            s3_client.generate_presigned_url,
-            'get_object',
-            Params={
-                'Bucket': S3_BUCKET,
-                'Key': object_key
-            },
-            ExpiresIn=3600
-        )
+        # Use direct S3 URL since bucket is publicly readable for stories
+        image_url = f"https://{S3_BUCKET}.s3.amazonaws.com/{object_key}"
         
         upload_time = time.time() - start_time
         logger.info(f"Request ID: {request_id} - Image saved to S3: {image_url}")
