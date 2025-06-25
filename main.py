@@ -112,6 +112,23 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Shutdown error: {str(e)}")
 
+# Health check endpoint for Lambda testing
+@app.get("/health")
+async def health_check():
+    """Health check endpoint to verify Lambda container is working"""
+    return {
+        "status": "healthy",
+        "message": "My Story Buddy API is running",
+        "timestamp": datetime.now().isoformat(),
+        "version": "2.0.0",
+        "environment": "lambda" if os.getenv("AWS_LAMBDA_FUNCTION_NAME") else "local"
+    }
+
+@app.get("/ping")
+async def ping():
+    """Simple ping endpoint for quick health checks"""
+    return {"message": "pong"}
+
 # Constants
 S3_BUCKET = "mystorybuddy-assets"
 
