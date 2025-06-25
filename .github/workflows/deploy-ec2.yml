@@ -46,6 +46,16 @@ jobs:
         echo "✅ Images pushed successfully"
         echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:latest" >> $GITHUB_OUTPUT
 
+    - name: Copy deployment files to EC2
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ec2-user
+        key: ${{ secrets.EC2_SSH_KEY }}
+        source: "docker-compose.production.yml,setup-https.sh,nginx.conf"
+        target: "/opt/my-story-buddy/"
+        strip_components: 0
+
     - name: Deploy to EC2
       uses: appleboy/ssh-action@v1.0.3
       with:
@@ -53,9 +63,19 @@ jobs:
         username: ec2-user
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          # Navigate to app directory
-          echo "📁 Navigating to application directory..."
+          # Navigate to app directory and ensure it exists
+          echo "📁 Setting up application directory..."
+          sudo mkdir -p /opt/my-story-buddy
+          sudo chown ec2-user:ec2-user /opt/my-story-buddy
           cd /opt/my-story-buddy
+          
+          # Verify deployment files are present
+          echo "📋 Verifying deployment files..."
+          ls -la
+          echo "Files present:"
+          [ -f docker-compose.production.yml ] && echo "✅ docker-compose.production.yml" || echo "❌ docker-compose.production.yml"
+          [ -f setup-https.sh ] && echo "✅ setup-https.sh" || echo "❌ setup-https.sh"
+          [ -f nginx.conf ] && echo "✅ nginx.conf" || echo "❌ nginx.conf"
           
           # Configure AWS credentials for ECR access
           echo "🔐 Configuring AWS credentials..."
@@ -92,6 +112,12 @@ jobs:
             ./setup-https.sh
           else
             echo "✅ HTTPS already configured"
+          fi
+          
+          # Use production docker-compose file
+          echo "📋 Using production docker-compose configuration..."
+          if [ -f docker-compose.production.yml ]; then
+            ln -sf docker-compose.production.yml docker-compose.yml
           fi
           
           # Pull latest image
