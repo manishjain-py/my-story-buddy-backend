@@ -161,9 +161,11 @@ async def create_tables():
             user_id VARCHAR(100),
             formats JSON,
             request_id VARCHAR(100),
+            status ENUM('IN_PROGRESS', 'NEW', 'VIEWED') DEFAULT 'IN_PROGRESS',
             INDEX idx_created_at (created_at),
             INDEX idx_user_id (user_id),
-            INDEX idx_request_id (request_id)
+            INDEX idx_request_id (request_id),
+            INDEX idx_status (status)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         """
         
@@ -201,19 +203,58 @@ async def create_tables():
         await db_manager.execute_update(fun_facts_table)
         await db_manager.execute_update(sessions_table)
         
+        # Run migrations for existing tables
+        await run_migrations()
+        
         logger.info("Database tables created successfully!")
         
     except Exception as e:
         logger.error(f"Error creating database tables: {str(e)}")
         raise
 
+async def run_migrations():
+    """Run database migrations for schema updates."""
+    try:
+        logger.info("Running database migrations...")
+        
+        # Migration 1: Add status column to stories table if it doesn't exist
+        try:
+            await db_manager.execute_update("""
+                ALTER TABLE stories 
+                ADD COLUMN status ENUM('IN_PROGRESS', 'NEW', 'VIEWED') DEFAULT 'IN_PROGRESS'
+            """)
+            logger.info("Added status column to stories table")
+        except Exception as e:
+            if "Duplicate column name" in str(e):
+                logger.info("Status column already exists in stories table")
+            else:
+                logger.warning(f"Error adding status column: {str(e)}")
+        
+        # Migration 2: Add index for status column
+        try:
+            await db_manager.execute_update("""
+                ALTER TABLE stories ADD INDEX idx_status (status)
+            """)
+            logger.info("Added index for status column")
+        except Exception as e:
+            if "Duplicate key name" in str(e):
+                logger.info("Status index already exists")
+            else:
+                logger.warning(f"Error adding status index: {str(e)}")
+        
+        logger.info("Database migrations completed successfully!")
+        
+    except Exception as e:
+        logger.error(f"Error running migrations: {str(e)}")
+        raise
+
 async def save_story(title: str, story_content: str, prompt: str, image_urls: list, 
-                    formats: list, request_id: str, user_id: str = None) -> int:
+                    formats: list, request_id: str, user_id: str = None, status: str = 'NEW') -> int:
     """Save a generated story to the database."""
     try:
         query = """
-        INSERT INTO stories (title, story_content, prompt, image_urls, formats, request_id, user_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO stories (title, story_content, prompt, image_urls, formats, request_id, user_id, status)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         import json
@@ -224,7 +265,8 @@ async def save_story(title: str, story_content: str, prompt: str, image_urls: li
             json.dumps(image_urls),
             json.dumps(formats),
             request_id,
-            user_id
+            user_id,
+            status
         )
         
         await db_manager.execute_update(query, params)
@@ -296,3 +338,175 @@ async def get_recent_stories(limit: int = 10, user_id: str = None) -> list:
     except Exception as e:
         logger.error(f"Error fetching recent stories: {str(e)}")
         return []
+
+async def create_story_placeholder(prompt: str, formats: list, request_id: str, user_id: str = None) -> int:
+    """Create a placeholder story entry with IN_PROGRESS status."""
+    try:
+        query = """
+        INSERT INTO stories (title, story_content, prompt, image_urls, formats, request_id, user_id, status)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        import json
+        params = (
+            "Story in Progress...",  # Placeholder title
+            "Your story is being generated...",  # Placeholder content
+            prompt,
+            json.dumps([]),  # Empty image URLs initially
+            json.dumps(formats),
+            request_id,
+            user_id,
+            'IN_PROGRESS'
+        )
+        
+        await db_manager.execute_update(query, params)
+        logger.info(f"Story placeholder created for request_id: {request_id}")
+        
+        # Get the inserted ID
+        result = await db_manager.execute_query("SELECT LAST_INSERT_ID() as id")
+        return result[0]['id'] if result else None
+        
+    except Exception as e:
+        logger.error(f"Error creating story placeholder: {str(e)}")
+        raise
+
+async def update_story_content(story_id: int, title: str, story_content: str, image_urls: list, status: str = 'NEW') -> bool:
+    """Update story content and mark as complete."""
+    try:
+        query = """
+        UPDATE stories 
+        SET title = %s, story_content = %s, image_urls = %s, status = %s, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+        """
+        
+        import json
+        params = (
+            title,
+            story_content,
+            json.dumps(image_urls),
+            status,
+            story_id
+        )
+        
+        affected_rows = await db_manager.execute_update(query, params)
+        if affected_rows > 0:
+            logger.info(f"Story content updated for story_id: {story_id}")
+            return True
+        else:
+            logger.warning(f"No story found with id: {story_id}")
+            return False
+        
+    except Exception as e:
+        logger.error(f"Error updating story content: {str(e)}")
+        raise
+
+async def update_story_status(story_id: int, status: str) -> bool:
+    """Update story status."""
+    try:
+        query = """
+        UPDATE stories 
+        SET status = %s, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+        """
+        
+        params = (status, story_id)
+        
+        affected_rows = await db_manager.execute_update(query, params)
+        if affected_rows > 0:
+            logger.info(f"Story status updated to {status} for story_id: {story_id}")
+            return True
+        else:
+            logger.warning(f"No story found with id: {story_id}")
+            return False
+        
+    except Exception as e:
+        logger.error(f"Error updating story status: {str(e)}")
+        raise
+
+async def get_story_by_id(story_id: int) -> dict:
+    """Get a story by its ID."""
+    try:
+        query = """
+        SELECT id, title, story_content, prompt, image_urls, formats, created_at, updated_at, status
+        FROM stories 
+        WHERE id = %s
+        """
+        
+        results = await db_manager.execute_query(query, (story_id,))
+        
+        if results:
+            import json
+            result = results[0]
+            if result['image_urls']:
+                result['image_urls'] = json.loads(result['image_urls'])
+            if result['formats']:
+                result['formats'] = json.loads(result['formats'])
+            return result
+        else:
+            return None
+        
+    except Exception as e:
+        logger.error(f"Error fetching story by ID: {str(e)}")
+        return None
+
+async def get_stories_with_status(user_id: str = None, limit: int = 10) -> list:
+    """Get recent stories with status information."""
+    try:
+        if user_id:
+            query = """
+            SELECT id, title, story_content, prompt, image_urls, formats, created_at, updated_at, status
+            FROM stories 
+            WHERE user_id = %s
+            ORDER BY created_at DESC 
+            LIMIT %s
+            """
+            params = (user_id, limit)
+        else:
+            query = """
+            SELECT id, title, story_content, prompt, image_urls, formats, created_at, updated_at, status
+            FROM stories 
+            ORDER BY created_at DESC 
+            LIMIT %s
+            """
+            params = (limit,)
+            
+        results = await db_manager.execute_query(query, params)
+        
+        # Parse JSON fields
+        import json
+        for result in results:
+            if result['image_urls']:
+                result['image_urls'] = json.loads(result['image_urls'])
+            if result['formats']:
+                result['formats'] = json.loads(result['formats'])
+                
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error fetching stories with status: {str(e)}")
+        return []
+
+async def get_new_stories_count(user_id: str = None) -> int:
+    """Get count of new/unread stories for a user."""
+    try:
+        if user_id:
+            query = """
+            SELECT COUNT(*) as count
+            FROM stories 
+            WHERE user_id = %s AND status = 'NEW'
+            """
+            params = (user_id,)
+        else:
+            query = """
+            SELECT COUNT(*) as count
+            FROM stories 
+            WHERE status = 'NEW'
+            """
+            params = ()
+            
+        results = await db_manager.execute_query(query, params)
+        return results[0]['count'] if results else 0
+        
+    except Exception as e:
+        logger.error(f"Error getting new stories count: {str(e)}")
+        return 0

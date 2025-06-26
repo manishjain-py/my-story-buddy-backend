@@ -12,7 +12,7 @@ from io import BytesIO
 import httpx
 import boto3
 import botocore
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -174,6 +174,20 @@ class FunFact(BaseModel):
 
 class FunFactsResponse(BaseModel):
     facts: list[FunFact]
+
+class AsyncStoryResponse(BaseModel):
+    story_id: int
+    status: str
+    message: str
+
+class StoryStatusResponse(BaseModel):
+    story_id: int
+    status: str
+    title: str
+    story: str
+    image_urls: list[str]
+    created_at: str
+    updated_at: str
 
 # Helper functions
 def cors_error_response(message: str, status_code: int = 500):
@@ -467,27 +481,13 @@ CONSISTENCY REMINDER: This is image {index+1} of 4 in the story series - charact
     
     return image_urls
 
-# Routes
-@app.post("/generateStory", response_model=StoryResponse)
-async def generate_story(request: StoryRequest, req: Request):
-    request_id = str(uuid.uuid4())
-    start_time = time.time()
-    
-    # Get current user if authenticated (optional)
-    current_user = None
+async def generate_story_background_task(story_id: int, prompt: str, formats: list, request_id: str, user_id: str = None):
+    """Background task to generate story content and update database."""
     try:
-        current_user = await get_optional_user(req)
-    except Exception as e:
-        logger.warning(f"Could not get user context: {e}")
-    
-    try:
-        log_request_details(req, request_id)
-        logger.info(f"Request ID: {request_id} - Starting story generation with Docker consistency")
-        logger.info(f"Request ID: {request_id} - Prompt: {request.prompt[:100]}...")
+        logger.info(f"Request ID: {request_id} - Starting background story generation for story_id: {story_id}")
         
-        # Generate story
-        story_start_time = time.time()
-        if not request.prompt.strip():
+        # Generate story content (same logic as original generateStory)
+        if not prompt.strip():
             logger.info(f"Request ID: {request_id} - Using default prompt")
             system_prompt = (
                 "You are a friendly and imaginative storyteller who creates elaborate, exciting, "
@@ -515,7 +515,7 @@ async def generate_story(request: StoryRequest, req: Request):
             
             # Check for personalized characters
             personalized_prompt = ""
-            original_prompt = request.prompt.lower()
+            original_prompt = prompt.lower()
             
             if "aadyu" in original_prompt:
                 logger.info(f"Request ID: {request_id} - Detected personalized character: Aadyu")
@@ -549,8 +549,9 @@ async def generate_story(request: StoryRequest, req: Request):
                 "Use double line breaks between paragraphs. Create 8-12 paragraphs to tell the full adventure."
                 + personalized_prompt
             )
-            user_prompt = request.prompt
+            user_prompt = prompt
 
+        # Generate story with OpenAI
         logger.info(f"Request ID: {request_id} - Generating story with GPT-4.1...")
         story_response = await client.chat.completions.create(
             model="gpt-4.1",
@@ -563,8 +564,7 @@ async def generate_story(request: StoryRequest, req: Request):
         )
         
         content = story_response.choices[0].message.content
-        story_time = time.time() - story_start_time
-        logger.info(f"Request ID: {request_id} - Story generated successfully in {story_time:.2f} seconds")
+        logger.info(f"Request ID: {request_id} - Story generated successfully")
         
         # Parse story response
         parts = content.split('\n\n', 1)
@@ -578,69 +578,179 @@ async def generate_story(request: StoryRequest, req: Request):
         
         # Ensure MyStoryBuddy branding is always present
         if "(Created By - MyStoryBuddy)" not in story:
-            # Remove any existing "The End!" and add our branded version
             if story.endswith("The End!"):
-                story = story[:-8].strip()  # Remove "The End!"
+                story = story[:-8].strip()
             elif "The End!" in story:
                 story = story.replace("The End!", "").strip()
-            
-            # Add our branded ending
             story += "\n\nThe End! (Created By - MyStoryBuddy)"
         
         logger.info(f"Request ID: {request_id} - Title: {title}")
 
-        # Generate multiple images
-        images_start_time = time.time()
-        logger.info(f"Request ID: {request_id} - Generating 4 comic images...")
-        image_urls = await generate_story_images(story, title, request_id, request.prompt)
-        images_time = time.time() - images_start_time
-        logger.info(f"Request ID: {request_id} - All 4 images generated successfully in {images_time:.2f} seconds")
+        # Generate images if Comic Book format is requested
+        image_urls = []
+        if "Comic Book" in formats:
+            logger.info(f"Request ID: {request_id} - Generating 4 comic images...")
+            image_urls = await generate_story_images(story, title, request_id, prompt)
+            logger.info(f"Request ID: {request_id} - Images generated successfully")
         
-        # Save story to database (if available)
-        if current_user and db_manager:
-            try:
-                from database import save_story
-                user_id = current_user["id"] if current_user else None
-                story_id = await save_story(
-                    title=title,
-                    story_content=story,
-                    prompt=request.prompt,
-                    image_urls=image_urls,
-                    formats=request.formats,
-                    request_id=request_id,
-                    user_id=user_id
-                )
-                logger.info(f"Request ID: {request_id} - Story saved to database with ID: {story_id}")
-            except Exception as e:
-                logger.error(f"Request ID: {request_id} - Failed to save story to database: {str(e)}")
-                # Don't fail the request if database save fails
+        # Update story in database
+        from database import update_story_content
+        success = await update_story_content(story_id, title, story, image_urls, status='NEW')
+        
+        if success:
+            logger.info(f"Request ID: {request_id} - Story {story_id} completed successfully")
+        else:
+            logger.error(f"Request ID: {request_id} - Failed to update story {story_id}")
+            
+    except Exception as e:
+        logger.error(f"Request ID: {request_id} - Background task failed for story_id: {story_id}")
+        logger.error(f"Error: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Mark story as failed or keep as IN_PROGRESS for retry
+        try:
+            from database import update_story_content
+            await update_story_content(story_id, "Story Generation Failed", 
+                                     "We encountered an error while generating your story. Please try again.", 
+                                     [], status='NEW')
+        except Exception as db_error:
+            logger.error(f"Failed to update story status after error: {str(db_error)}")
 
-        # Log performance metrics
-        total_time = time.time() - start_time
-        logger.info(f"Request ID: {request_id} - Story generation completed successfully in {total_time:.2f} seconds")
-        logger.info(f"Request ID: {request_id} - Performance metrics:")
-        logger.info(f"  - Story generation: {story_time:.2f}s")
-        logger.info(f"  - Images generation: {images_time:.2f}s")
-        logger.info(f"  - Total time: {total_time:.2f}s")
-
+# Routes
+@app.post("/generateStory", response_model=AsyncStoryResponse)
+async def generate_story_async(request: StoryRequest, req: Request, background_tasks: BackgroundTasks):
+    request_id = str(uuid.uuid4())
+    
+    # Get current user if authenticated (optional)
+    current_user = None
+    try:
+        current_user = await get_optional_user(req)
+    except Exception as e:
+        logger.warning(f"Could not get user context: {e}")
+    
+    try:
+        log_request_details(req, request_id)
+        logger.info(f"Request ID: {request_id} - Starting async story generation")
+        logger.info(f"Request ID: {request_id} - Prompt: {request.prompt[:100]}...")
+        
+        # Create story placeholder in database
+        from database import create_story_placeholder
+        user_id = current_user["id"] if current_user else None
+        story_id = await create_story_placeholder(
+            prompt=request.prompt,
+            formats=request.formats,
+            request_id=request_id,
+            user_id=user_id
+        )
+        
+        if not story_id:
+            raise Exception("Failed to create story placeholder")
+        
+        logger.info(f"Request ID: {request_id} - Created story placeholder with ID: {story_id}")
+        
+        # Start background task for story generation
+        background_tasks.add_task(
+            generate_story_background_task,
+            story_id=story_id,
+            prompt=request.prompt,
+            formats=request.formats,
+            request_id=request_id,
+            user_id=user_id
+        )
+        
+        logger.info(f"Request ID: {request_id} - Background task started for story generation")
+        
         response_data = {
-            "title": title,
-            "story": story,
-            "image_urls": image_urls
+            "story_id": story_id,
+            "status": "IN_PROGRESS",
+            "message": "Story generation started! Check My Stories for updates."
         }
         
-        # Add user info if authenticated
-        if current_user:
-            response_data["user"] = {
-                "id": current_user["id"],
-                "first_name": current_user["first_name"]
-            }
-
         return JSONResponse(
             content=response_data,
             headers={
                 "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
                 "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except Exception as e:
+        log_error(e, request_id)
+        return cors_error_response(str(e))
+
+@app.get("/story/{story_id}/status", response_model=StoryStatusResponse)
+async def get_story_status(story_id: int, req: Request):
+    """Get the status of a story by its ID."""
+    request_id = str(uuid.uuid4())
+    
+    try:
+        logger.info(f"Request ID: {request_id} - Getting status for story_id: {story_id}")
+        
+        from database import get_story_by_id
+        story = await get_story_by_id(story_id)
+        
+        if not story:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": "Story not found"},
+                headers={
+                    "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        response_data = {
+            "story_id": story["id"],
+            "status": story["status"],
+            "title": story["title"],
+            "story": story["story_content"],
+            "image_urls": story["image_urls"] or [],
+            "created_at": story["created_at"].isoformat() if story["created_at"] else "",
+            "updated_at": story["updated_at"].isoformat() if story["updated_at"] else ""
+        }
+        
+        return JSONResponse(
+            content=response_data,
+            headers={
+                "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except Exception as e:
+        log_error(e, request_id)
+        return cors_error_response(str(e))
+
+@app.put("/story/{story_id}/viewed")
+async def mark_story_viewed(story_id: int, req: Request):
+    """Mark a story as viewed."""
+    request_id = str(uuid.uuid4())
+    
+    try:
+        logger.info(f"Request ID: {request_id} - Marking story_id: {story_id} as viewed")
+        
+        from database import update_story_status
+        success = await update_story_status(story_id, 'VIEWED')
+        
+        if not success:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": "Story not found"},
+                headers={
+                    "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
+                    "Access-Control-Allow-Methods": "PUT, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        return JSONResponse(
+            content={"message": "Story marked as viewed"},
+            headers={
+                "Access-Control-Allow-Origin": "https://www.mystorybuddy.com",
+                "Access-Control-Allow-Methods": "PUT, OPTIONS",
                 "Access-Control-Allow-Headers": "*"
             }
         )
@@ -855,8 +965,9 @@ async def get_user_stories(req: Request):
                 }
             )
         
-        from database import get_recent_stories
-        stories = await get_recent_stories(limit=50, user_id=str(current_user["id"]))
+        from database import get_stories_with_status, get_new_stories_count
+        stories = await get_stories_with_status(user_id=str(current_user["id"]), limit=50)
+        new_stories_count = await get_new_stories_count(user_id=str(current_user["id"]))
         
         # Format the response
         formatted_stories = []
@@ -868,11 +979,16 @@ async def get_user_stories(req: Request):
                 "prompt": story["prompt"],
                 "image_urls": story["image_urls"] or [],
                 "formats": story["formats"] or [],
-                "created_at": story["created_at"].isoformat() if story["created_at"] else None
+                "created_at": story["created_at"].isoformat() if story["created_at"] else None,
+                "updated_at": story["updated_at"].isoformat() if story["updated_at"] else None,
+                "status": story["status"]
             })
         
         return JSONResponse(
-            content={"stories": formatted_stories},
+            content={
+                "stories": formatted_stories,
+                "new_stories_count": new_stories_count
+            },
             headers={
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -927,7 +1043,9 @@ async def catch_all(path: str, request: Request):
         return await generate_fun_facts(FunFactRequest(prompt=prompt), request)
     else:
         # Default to story generation for backward compatibility
-        return await generate_story(StoryRequest(prompt=prompt), request)
+        from fastapi import BackgroundTasks
+        background_tasks = BackgroundTasks()
+        return await generate_story_async(StoryRequest(prompt=prompt), request, background_tasks)
 
 # Create handler for AWS Lambda
 handler = Mangum(app) 
