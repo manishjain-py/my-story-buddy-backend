@@ -123,6 +123,15 @@ Need to create `user_avatars` table with:
 **Solution**: Added robust retry mechanism with 10 attempts and 2-second intervals (up to 20 seconds total wait)
 **Files Changed**: dev-local.sh (improved health check logic and added avatar endpoint documentation)
 
+### OpenAI Model Deprecation Fix (2025-06-26)
+**Problem**: Avatar generation failing with 404 error - gpt-4-vision-preview and gpt-4.1 models deprecated
+**Solution**: Updated all model references to use current OpenAI models
+**Changes**: 
+- gpt-4-vision-preview → gpt-4o (vision capabilities included)
+- gpt-4.1 → gpt-4o (latest GPT-4 model)  
+- gpt-image-1 → dall-e-3 (correct image generation model)
+**Files Changed**: main.py (5 model references updated)
+
 ## Ready for Deployment
 - All backend endpoints implemented and follow existing patterns
 - Frontend component integrated with existing navigation

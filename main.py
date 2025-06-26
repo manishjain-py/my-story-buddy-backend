@@ -324,7 +324,7 @@ async def generate_story_images(story: str, title: str, request_id: str, origina
     )
     
     breakdown_response = await client.chat.completions.create(
-        model="gpt-4.1",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": breakdown_system_prompt},
             {"role": "user", "content": f"Break down this story into 4 comic parts:\n\n{story}"}
@@ -383,7 +383,7 @@ Make Aadyu a central figure in the panels, showing his personality through expre
     )
     
     consistency_response = await client.chat.completions.create(
-        model="gpt-4.1",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": consistency_system_prompt},
             {"role": "user", "content": f"Create a visual consistency guide for this story:\n\n{story}{personalization_note}"}
@@ -440,7 +440,7 @@ CONSISTENCY REMINDER: This is image {index+1} of 4 in the story series - charact
 '''
             
             image_response = await client.images.generate(
-                model="gpt-image-1",
+                model="dall-e-3",
                 prompt=visual_prompt,
                 n=1
             )
@@ -564,9 +564,9 @@ async def generate_story_background_task(story_id: int, prompt: str, formats: li
             user_prompt = prompt
 
         # Generate story with OpenAI
-        logger.info(f"Request ID: {request_id} - Generating story with GPT-4.1...")
+        logger.info(f"Request ID: {request_id} - Generating story with GPT-4o...")
         story_response = await client.chat.completions.create(
-            model="gpt-4.1",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -815,9 +815,9 @@ async def generate_fun_facts(request: FunFactRequest, req: Request):
             "Make each fact delightful and wonder-filled for curious young minds."
         )
         
-        logger.info(f"Request ID: {request_id} - Generating fun facts with GPT-4.1...")
+        logger.info(f"Request ID: {request_id} - Generating fun facts with GPT-4o...")
         fun_facts_response = await client.chat.completions.create(
-            model="gpt-4.1",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": context_prompt}
@@ -1072,7 +1072,7 @@ The avatar should be suitable for inclusion in children's stories and comic book
         
         # First, use GPT-4 Vision to analyze the image and create a detailed description
         vision_response = await client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o",
             messages=[
                 {
                     "role": "user",
