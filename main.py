@@ -12,7 +12,7 @@ from io import BytesIO
 import httpx
 import boto3
 import botocore
-from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -188,6 +188,18 @@ class StoryStatusResponse(BaseModel):
     image_urls: list[str]
     created_at: str
     updated_at: str
+
+class AvatarResponse(BaseModel):
+    id: int
+    avatar_name: str
+    traits_description: str
+    s3_image_url: str
+    created_at: str
+    updated_at: str
+
+class AvatarUpdateRequest(BaseModel):
+    avatar_name: str = None
+    traits_description: str = None
 
 # Helper functions
 def cors_error_response(message: str, status_code: int = 500):
@@ -1015,6 +1027,545 @@ async def preflight_my_stories():
         headers={
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
+
+async def generate_comic_avatar(uploaded_image_bytes: bytes, avatar_name: str, traits_description: str, request_id: str) -> bytes:
+    """Generate a comic-style avatar using GPT-4 Vision and return the generated image bytes."""
+    try:
+        logger.info(f"Request ID: {request_id} - Starting comic avatar generation")
+        
+        # Encode the uploaded image to base64 for GPT-4 Vision
+        import base64
+        image_base64 = base64.b64encode(uploaded_image_bytes).decode('utf-8')
+        
+        # Create the avatar generation prompt
+        avatar_prompt = f"""
+Create a comic-style avatar based on the uploaded photo with these specifications:
+
+AVATAR DETAILS:
+- Name: {avatar_name}
+- Personality Traits: {traits_description}
+
+STYLE REQUIREMENTS:
+- Transform the person in the photo into a comic book character
+- Maintain recognizable facial features and characteristics
+- Use vibrant, comic book colors with bold outlines
+- Style should be friendly, approachable, and suitable for children's stories
+- Art style similar to modern animated movies (Pixar/Disney-like)
+- Show personality traits through facial expression and pose
+- Single character portrait, clean background
+
+TECHNICAL SPECS:
+- High quality illustration
+- Clean, professional comic book art style
+- Character should look heroic and friendly
+- Appropriate for use in children's story illustrations
+
+Make the character embody the personality traits: {traits_description}
+The avatar should be suitable for inclusion in children's stories and comic books.
+"""
+
+        # Generate the comic avatar using GPT-4 Vision
+        logger.info(f"Request ID: {request_id} - Sending request to OpenAI for avatar generation")
+        
+        # First, use GPT-4 Vision to analyze the image and create a detailed description
+        vision_response = await client.chat.completions.create(
+            model="gpt-4-vision-preview",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Analyze this photo and create a detailed description for generating a comic-style avatar. Focus on facial features, hair, and distinctive characteristics. The avatar should be named '{avatar_name}' and have these traits: {traits_description}"
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}",
+                                "detail": "high"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=500,
+            temperature=0.3
+        )
+        
+        character_description = vision_response.choices[0].message.content
+        logger.info(f"Request ID: {request_id} - Character description generated")
+        
+        # Now use DALL-E to generate the comic avatar based on the description
+        enhanced_prompt = f"""
+Create a comic-style character avatar based on this description:
+
+{character_description}
+
+STYLE REQUIREMENTS:
+- Comic book/animated movie style (similar to Pixar/Disney)
+- Vibrant colors with bold, clean outlines
+- Friendly and approachable appearance
+- Single character portrait with simple background
+- High quality digital illustration
+- Character embodies these traits: {traits_description}
+- Suitable for children's story illustrations
+
+The character's name is {avatar_name} and should look heroic and friendly.
+"""
+        
+        avatar_response = await client.images.generate(
+            model="dall-e-3",
+            prompt=enhanced_prompt,
+            n=1,
+            size="1024x1024",
+            quality="standard"
+        )
+        
+        # Get the generated image
+        avatar_base64 = avatar_response.data[0].b64_json
+        avatar_bytes = base64.b64decode(avatar_base64)
+        
+        logger.info(f"Request ID: {request_id} - Comic avatar generated successfully")
+        return avatar_bytes
+        
+    except Exception as e:
+        logger.error(f"Request ID: {request_id} - Error generating comic avatar: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate comic avatar: {str(e)}"
+        )
+
+@app.post("/personalization/avatar")
+async def create_avatar(
+    req: Request,
+    avatar_name: str = Form(...),
+    traits_description: str = Form(...),
+    image: UploadFile = File(...)
+):
+    """Upload an image and generate a comic-style avatar for the authenticated user."""
+    request_id = str(uuid.uuid4())
+    
+    try:
+        # Get current authenticated user using manual header parsing
+        from fastapi.security.utils import get_authorization_scheme_param
+        
+        authorization = req.headers.get("Authorization")
+        if not authorization:
+            return JSONResponse(
+                content={"error": "Authentication required"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        scheme, token = get_authorization_scheme_param(authorization)
+        if scheme.lower() != "bearer":
+            return JSONResponse(
+                content={"error": "Invalid authentication scheme"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        # Verify JWT token
+        from auth_utils import JWTUtils
+        payload = JWTUtils.verify_token(token)
+        if payload is None:
+            return JSONResponse(
+                content={"error": "Invalid token"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        user_id = payload.get("user_id")
+        if user_id is None:
+            return JSONResponse(
+                content={"error": "Invalid token payload"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        # Get user from database
+        from auth_models import UserDatabase
+        current_user = await UserDatabase.get_user_by_id(user_id)
+        if current_user is None:
+            return JSONResponse(
+                content={"error": "User not found"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        user_id = current_user["id"]
+        
+        log_request_details(req, request_id)
+        logger.info(f"Request ID: {request_id} - Creating avatar for user_id: {user_id}")
+        logger.info(f"Request ID: {request_id} - Avatar name: {avatar_name}")
+        logger.info(f"Request ID: {request_id} - Traits: {traits_description}")
+        
+        # Validate image file
+        if not image.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="File must be an image")
+        
+        # Check file size (max 10MB)
+        image_bytes = await image.read()
+        if len(image_bytes) > 10 * 1024 * 1024:  # 10MB
+            raise HTTPException(status_code=400, detail="Image file too large (max 10MB)")
+        
+        logger.info(f"Request ID: {request_id} - Image uploaded: {len(image_bytes)} bytes")
+        
+        # Generate comic-style avatar
+        avatar_image_bytes = await generate_comic_avatar(
+            image_bytes, avatar_name, traits_description, request_id
+        )
+        
+        # Save avatar image to S3 with special path for avatars
+        avatar_s3_url = await save_avatar_to_s3(avatar_image_bytes, user_id, request_id)
+        
+        # Save avatar to database
+        from database import create_user_avatar
+        avatar_id = await create_user_avatar(
+            user_id=user_id,
+            avatar_name=avatar_name,
+            traits_description=traits_description,
+            s3_image_url=avatar_s3_url
+        )
+        
+        # Get the created avatar for response
+        from database import get_user_avatar
+        avatar_data = await get_user_avatar(user_id)
+        
+        if not avatar_data:
+            raise HTTPException(status_code=500, detail="Failed to retrieve created avatar")
+        
+        response_data = {
+            "id": avatar_data["id"],
+            "avatar_name": avatar_data["avatar_name"],
+            "traits_description": avatar_data["traits_description"],
+            "s3_image_url": avatar_data["s3_image_url"],
+            "created_at": avatar_data["created_at"].isoformat(),
+            "updated_at": avatar_data["updated_at"].isoformat()
+        }
+        
+        logger.info(f"Request ID: {request_id} - Avatar created successfully with ID: {avatar_id}")
+        
+        return JSONResponse(
+            content=response_data,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error(e, request_id)
+        return cors_error_response(f"Failed to create avatar: {str(e)}")
+
+async def save_avatar_to_s3(image_bytes: bytes, user_id: int, request_id: str) -> str:
+    """Save avatar image to S3 in the avatars directory."""
+    if s3_client is None:
+        logger.warning(f"Request ID: {request_id} - S3 client not initialized, skipping avatar upload")
+        raise HTTPException(status_code=500, detail="Image storage not available")
+        
+    try:
+        start_time = time.time()
+        logger.info(f"Request ID: {request_id} - Starting avatar S3 upload")
+        
+        # Use avatars directory with user_id for organization
+        object_key = f"avatars/user_{user_id}_{request_id}.png"
+        logger.info(f"Request ID: {request_id} - Generated object key: {object_key}")
+        
+        await asyncio.to_thread(
+            s3_client.put_object,
+            Bucket=S3_BUCKET,
+            Key=object_key,
+            Body=image_bytes,
+            ContentType="image/png"
+        )
+        
+        # Use direct S3 URL since bucket is publicly readable
+        image_url = f"https://{S3_BUCKET}.s3.amazonaws.com/{object_key}"
+        
+        upload_time = time.time() - start_time
+        logger.info(f"Request ID: {request_id} - Avatar saved to S3: {image_url}")
+        logger.info(f"Request ID: {request_id} - S3 upload completed in {upload_time:.2f} seconds")
+        return image_url
+        
+    except Exception as e:
+        log_error(e, request_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save avatar image: {str(e)}"
+        )
+
+@app.get("/personalization/avatar", response_model=AvatarResponse)
+async def get_avatar(req: Request):
+    """Get the current user's avatar."""
+    request_id = str(uuid.uuid4())
+    
+    try:
+        # Get current authenticated user using manual header parsing
+        from fastapi.security.utils import get_authorization_scheme_param
+        
+        authorization = req.headers.get("Authorization")
+        if not authorization:
+            return JSONResponse(
+                content={"error": "Authentication required"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        scheme, token = get_authorization_scheme_param(authorization)
+        if scheme.lower() != "bearer":
+            return JSONResponse(
+                content={"error": "Invalid authentication scheme"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        # Verify JWT token
+        from auth_utils import JWTUtils
+        payload = JWTUtils.verify_token(token)
+        if payload is None:
+            return JSONResponse(
+                content={"error": "Invalid token"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        user_id = payload.get("user_id")
+        if user_id is None:
+            return JSONResponse(
+                content={"error": "Invalid token payload"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        # Get user from database
+        from auth_models import UserDatabase
+        current_user = await UserDatabase.get_user_by_id(user_id)
+        if current_user is None:
+            return JSONResponse(
+                content={"error": "User not found"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        user_id = current_user["id"]
+        
+        logger.info(f"Request ID: {request_id} - Getting avatar for user_id: {user_id}")
+        
+        from database import get_user_avatar
+        avatar_data = await get_user_avatar(user_id)
+        
+        if not avatar_data:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": "No avatar found for user"},
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        response_data = {
+            "id": avatar_data["id"],
+            "avatar_name": avatar_data["avatar_name"],
+            "traits_description": avatar_data["traits_description"],
+            "s3_image_url": avatar_data["s3_image_url"],
+            "created_at": avatar_data["created_at"].isoformat(),
+            "updated_at": avatar_data["updated_at"].isoformat()
+        }
+        
+        return JSONResponse(
+            content=response_data,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error(e, request_id)
+        return cors_error_response(f"Failed to get avatar: {str(e)}")
+
+@app.put("/personalization/avatar")
+async def update_avatar(req: Request, update_data: AvatarUpdateRequest):
+    """Update avatar name and/or traits (not the image)."""
+    request_id = str(uuid.uuid4())
+    
+    try:
+        # Get current authenticated user using manual header parsing
+        from fastapi.security.utils import get_authorization_scheme_param
+        
+        authorization = req.headers.get("Authorization")
+        if not authorization:
+            return JSONResponse(
+                content={"error": "Authentication required"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "PUT, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        scheme, token = get_authorization_scheme_param(authorization)
+        if scheme.lower() != "bearer":
+            return JSONResponse(
+                content={"error": "Invalid authentication scheme"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "PUT, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        # Verify JWT token
+        from auth_utils import JWTUtils
+        payload = JWTUtils.verify_token(token)
+        if payload is None:
+            return JSONResponse(
+                content={"error": "Invalid token"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "PUT, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        user_id = payload.get("user_id")
+        if user_id is None:
+            return JSONResponse(
+                content={"error": "Invalid token payload"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "PUT, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        # Get user from database
+        from auth_models import UserDatabase
+        current_user = await UserDatabase.get_user_by_id(user_id)
+        if current_user is None:
+            return JSONResponse(
+                content={"error": "User not found"},
+                status_code=401,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "PUT, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        user_id = current_user["id"]
+        
+        logger.info(f"Request ID: {request_id} - Updating avatar for user_id: {user_id}")
+        
+        from database import update_user_avatar
+        success = await update_user_avatar(
+            user_id=user_id,
+            avatar_name=update_data.avatar_name,
+            traits_description=update_data.traits_description
+        )
+        
+        if not success:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": "No avatar found for user"},
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "PUT, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        # Get updated avatar data
+        from database import get_user_avatar
+        avatar_data = await get_user_avatar(user_id)
+        
+        response_data = {
+            "id": avatar_data["id"],
+            "avatar_name": avatar_data["avatar_name"],
+            "traits_description": avatar_data["traits_description"],
+            "s3_image_url": avatar_data["s3_image_url"],
+            "created_at": avatar_data["created_at"].isoformat(),
+            "updated_at": avatar_data["updated_at"].isoformat()
+        }
+        
+        return JSONResponse(
+            content=response_data,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "PUT, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error(e, request_id)
+        return cors_error_response(f"Failed to update avatar: {str(e)}")
+
+@app.options("/personalization/avatar")
+async def preflight_avatar():
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
             "Access-Control-Allow-Headers": "*"
         }
     )

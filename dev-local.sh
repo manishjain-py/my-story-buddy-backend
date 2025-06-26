@@ -83,15 +83,29 @@ eval $DOCKER_CMD
 
 # Wait for the container to start and initialize
 echo -e "${YELLOW}⏳ Waiting for container to start and initialize...${NC}"
-sleep 8
+sleep 15
 
 # Check if container is running
 if docker ps | grep -q $CONTAINER_NAME; then
     echo -e "${GREEN}✅ Container started successfully!${NC}"
     
-    # Test health endpoint
+    # Test health endpoint with retry
     echo -e "${YELLOW}🏥 Testing health endpoint...${NC}"
-    if curl -s http://localhost:$PORT/health >/dev/null; then
+    HEALTH_CHECK_RETRIES=0
+    MAX_RETRIES=10
+    HEALTH_CHECK_PASSED=false
+    
+    while [ $HEALTH_CHECK_RETRIES -lt $MAX_RETRIES ]; do
+        if curl -s http://localhost:$PORT/health >/dev/null 2>&1; then
+            HEALTH_CHECK_PASSED=true
+            break
+        fi
+        HEALTH_CHECK_RETRIES=$((HEALTH_CHECK_RETRIES + 1))
+        echo -e "${YELLOW}   Attempt $HEALTH_CHECK_RETRIES/$MAX_RETRIES failed, retrying in 2 seconds...${NC}"
+        sleep 2
+    done
+    
+    if [ "$HEALTH_CHECK_PASSED" = true ]; then
         echo -e "${GREEN}✅ Health check passed!${NC}"
         echo ""
         echo -e "${GREEN}🎉 Backend is ready for development!${NC}"
@@ -118,9 +132,18 @@ if docker ps | grep -q $CONTAINER_NAME; then
         echo "   curl -X POST http://localhost:$PORT/generateStory \\"
         echo "     -H \"Content-Type: application/json\" \\"
         echo "     -d '{\"prompt\": \"a friendly cat adventure\"}'"
+        echo ""
+        echo "🎭 Test avatar endpoints:"
+        echo "   curl -X GET http://localhost:$PORT/personalization/avatar \\"
+        echo "     -H \"Authorization: Bearer your-jwt-token\""
     else
-        echo -e "${RED}❌ Health check failed. Check container logs:${NC}"
+        echo -e "${RED}❌ Health check failed after $MAX_RETRIES attempts. Check container logs:${NC}"
         echo "   docker logs $CONTAINER_NAME"
+        echo ""
+        echo "💡 Common issues:"
+        echo "   - Database connection issues (check DB_PASSWORD)"
+        echo "   - Port 8003 already in use"
+        echo "   - Container taking longer to initialize"
     fi
 else
     echo -e "${RED}❌ Container failed to start. Check logs:${NC}"

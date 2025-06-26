@@ -198,10 +198,29 @@ async def create_tables():
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         """
         
+        # User avatars table for personalization feature
+        avatars_table = """
+        CREATE TABLE IF NOT EXISTS user_avatars (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            avatar_name VARCHAR(255) NOT NULL,
+            traits_description TEXT,
+            s3_image_url VARCHAR(500) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            is_active BOOLEAN DEFAULT TRUE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            INDEX idx_user_id (user_id),
+            INDEX idx_created_at (created_at),
+            INDEX idx_is_active (is_active)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        """
+        
         # Execute table creation
         await db_manager.execute_update(stories_table)
         await db_manager.execute_update(fun_facts_table)
         await db_manager.execute_update(sessions_table)
+        await db_manager.execute_update(avatars_table)
         
         # Run migrations for existing tables
         await run_migrations()
@@ -514,3 +533,90 @@ async def get_new_stories_count(user_id: str = None) -> int:
     except Exception as e:
         logger.error(f"Error getting new stories count: {str(e)}")
         return 0
+
+# Avatar management functions
+async def create_user_avatar(user_id: int, avatar_name: str, traits_description: str, s3_image_url: str) -> int:
+    """Create or update user avatar (limit one per user)."""
+    try:
+        # First, deactivate any existing avatars for this user
+        await db_manager.execute_update(
+            "UPDATE user_avatars SET is_active = FALSE WHERE user_id = %s",
+            (user_id,)
+        )
+        
+        # Create new avatar
+        query = """
+        INSERT INTO user_avatars (user_id, avatar_name, traits_description, s3_image_url)
+        VALUES (%s, %s, %s, %s)
+        """
+        
+        params = (user_id, avatar_name, traits_description, s3_image_url)
+        await db_manager.execute_update(query, params)
+        
+        # Get the inserted ID
+        result = await db_manager.execute_query("SELECT LAST_INSERT_ID() as id")
+        avatar_id = result[0]['id'] if result else None
+        
+        logger.info(f"Avatar created for user_id: {user_id}, avatar_id: {avatar_id}")
+        return avatar_id
+        
+    except Exception as e:
+        logger.error(f"Error creating user avatar: {str(e)}")
+        raise
+
+async def get_user_avatar(user_id: int) -> dict:
+    """Get user's active avatar."""
+    try:
+        query = """
+        SELECT id, avatar_name, traits_description, s3_image_url, created_at, updated_at
+        FROM user_avatars 
+        WHERE user_id = %s AND is_active = TRUE
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+        
+        results = await db_manager.execute_query(query, (user_id,))
+        return results[0] if results else None
+        
+    except Exception as e:
+        logger.error(f"Error fetching user avatar: {str(e)}")
+        return None
+
+async def update_user_avatar(user_id: int, avatar_name: str = None, traits_description: str = None) -> bool:
+    """Update user avatar details (not image)."""
+    try:
+        # Build dynamic update query
+        update_fields = []
+        params = []
+        
+        if avatar_name is not None:
+            update_fields.append("avatar_name = %s")
+            params.append(avatar_name)
+            
+        if traits_description is not None:
+            update_fields.append("traits_description = %s")
+            params.append(traits_description)
+            
+        if not update_fields:
+            return False
+            
+        update_fields.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(user_id)
+        
+        query = f"""
+        UPDATE user_avatars 
+        SET {', '.join(update_fields)}
+        WHERE user_id = %s AND is_active = TRUE
+        """
+        
+        affected_rows = await db_manager.execute_update(query, tuple(params))
+        if affected_rows > 0:
+            logger.info(f"Avatar updated for user_id: {user_id}")
+            return True
+        else:
+            logger.warning(f"No active avatar found for user_id: {user_id}")
+            return False
+        
+    except Exception as e:
+        logger.error(f"Error updating user avatar: {str(e)}")
+        raise
