@@ -34,15 +34,22 @@ if [ -z "$OPENAI_API_KEY" ]; then
 fi
 
 # Check for AWS credentials (needed for S3 image uploads)
-if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
-    echo -e "${YELLOW}⚠️  AWS credentials not set. Images will not be uploaded to S3.${NC}"
-    echo "For full functionality, set these environment variables:"
-    echo "  export AWS_ACCESS_KEY_ID=\"your-access-key\""
-    echo "  export AWS_SECRET_ACCESS_KEY=\"your-secret-key\""
+AWS_CREDENTIALS_AVAILABLE=false
+if [ -f "$HOME/.aws/credentials" ] || [ -f "$HOME/.aws/config" ]; then
+    echo -e "${GREEN}✅ AWS credentials found in ~/.aws/ directory${NC}"
+    AWS_CREDENTIALS_AVAILABLE=true
+elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+    echo -e "${GREEN}✅ AWS credentials found in environment variables${NC}"
+    AWS_CREDENTIALS_AVAILABLE=true
+else
+    echo -e "${YELLOW}⚠️  AWS credentials not found. Images will not be uploaded to S3.${NC}"
+    echo "For full functionality, either:"
+    echo "  1. Configure AWS CLI: aws configure"
+    echo "  2. Or set environment variables:"
+    echo "     export AWS_ACCESS_KEY_ID=\"your-access-key\""
+    echo "     export AWS_SECRET_ACCESS_KEY=\"your-secret-key\""
     echo ""
     echo "Continuing without S3 functionality..."
-    AWS_ACCESS_KEY_ID=""
-    AWS_SECRET_ACCESS_KEY=""
 fi
 
 # Stop and remove existing container if running
@@ -56,14 +63,23 @@ docker build -f Dockerfile.ec2 -t $IMAGE_NAME . --no-cache
 
 # Start the container
 echo -e "${YELLOW}🐳 Starting container...${NC}"
-docker run -d \
-    -p $PORT:$PORT \
-    -e OPENAI_API_KEY="$OPENAI_API_KEY" \
-    -e AWS_REGION="us-east-1" \
-    -e AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
-    -e AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
-    --name $CONTAINER_NAME \
-    $IMAGE_NAME
+
+# Build docker run command with conditional AWS credentials mounting
+DOCKER_CMD="docker run -d -p $PORT:$PORT -e OPENAI_API_KEY=\"$OPENAI_API_KEY\" -e AWS_REGION=\"us-east-1\""
+
+# Add AWS credentials - prefer mounting ~/.aws directory, fallback to environment variables
+if [ -f "$HOME/.aws/credentials" ] || [ -f "$HOME/.aws/config" ]; then
+    echo -e "${BLUE}📁 Mounting ~/.aws directory for credentials${NC}"
+    DOCKER_CMD="$DOCKER_CMD -v $HOME/.aws:/root/.aws:ro"
+elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+    echo -e "${BLUE}🔑 Using environment variables for AWS credentials${NC}"
+    DOCKER_CMD="$DOCKER_CMD -e AWS_ACCESS_KEY_ID=\"$AWS_ACCESS_KEY_ID\" -e AWS_SECRET_ACCESS_KEY=\"$AWS_SECRET_ACCESS_KEY\""
+fi
+
+DOCKER_CMD="$DOCKER_CMD --name $CONTAINER_NAME $IMAGE_NAME"
+
+# Execute the docker command
+eval $DOCKER_CMD
 
 # Wait for the container to start and initialize
 echo -e "${YELLOW}⏳ Waiting for container to start and initialize...${NC}"
@@ -87,7 +103,7 @@ if docker ps | grep -q $CONTAINER_NAME; then
         echo ""
         echo "🔑 Environment status:"
         echo "   OpenAI API: ✅ Configured"
-        if [ -n "$AWS_ACCESS_KEY_ID" ]; then
+        if [ "$AWS_CREDENTIALS_AVAILABLE" = true ]; then
             echo "   AWS S3:     ✅ Configured (images will upload)"
         else
             echo "   AWS S3:     ⚠️  Not configured (placeholder images only)"

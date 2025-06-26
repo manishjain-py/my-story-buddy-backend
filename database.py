@@ -359,12 +359,16 @@ async def create_story_placeholder(prompt: str, formats: list, request_id: str, 
             'IN_PROGRESS'
         )
         
-        await db_manager.execute_update(query, params)
+        result = await db_manager.execute_update(query, params)
         logger.info(f"Story placeholder created for request_id: {request_id}")
         
-        # Get the inserted ID
-        result = await db_manager.execute_query("SELECT LAST_INSERT_ID() as id")
-        return result[0]['id'] if result else None
+        # Get the inserted ID - check if execute_update returns it
+        if hasattr(result, 'lastrowid') and result.lastrowid:
+            return result.lastrowid
+        
+        # Fallback: query for the ID using request_id
+        id_result = await db_manager.execute_query("SELECT id FROM stories WHERE request_id = %s", (request_id,))
+        return id_result[0]['id'] if id_result else None
         
     except Exception as e:
         logger.error(f"Error creating story placeholder: {str(e)}")
