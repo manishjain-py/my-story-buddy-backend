@@ -5,8 +5,7 @@ services:
     image: 926211191776.dkr.ecr.us-east-1.amazonaws.com/my-story-buddy-backend:latest
     container_name: my-story-buddy-app
     ports:
-      - "80:8003"      # HTTP traffic on port 80
-      - "8003:8003"    # Direct API access
+      - "8003:8003"    # API access for system nginx proxy
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - AWS_REGION=us-east-1
@@ -31,16 +30,5 @@ services:
         reservations:
           memory: 1G
 
-  # Nginx reverse proxy for HTTPS
-  nginx:
-    image: nginx:alpine
-    container_name: my-story-buddy-nginx
-    ports:
-      - "80:80"       # HTTP (redirects to HTTPS)
-      - "443:443"     # HTTPS
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - my-story-buddy
-    restart: unless-stopped
+# Note: System nginx handles SSL termination and CloudFront routing
+# No containerized nginx needed - system nginx proxies to port 8003
