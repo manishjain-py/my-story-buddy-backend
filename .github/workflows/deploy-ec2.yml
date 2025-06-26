@@ -133,6 +133,11 @@ jobs:
           echo "🚀 Starting application container..."
           docker-compose up -d
           
+          # Update nginx configuration for CloudFront routing
+          echo "🔧 Updating nginx configuration for CloudFront routing..."
+          sudo cp nginx-api-path.conf /etc/nginx/conf.d/mystorybuddy.conf
+          sudo nginx -t
+          
           # Ensure system nginx is running and configured
           echo "🔧 Ensuring system nginx is properly configured..."
           sudo systemctl stop nginx || true
