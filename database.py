@@ -296,6 +296,19 @@ async def run_migrations():
         except Exception as e:
             logger.warning(f"Error modifying s3_image_url column: {str(e)}")
         
+        # Migration 6: Add visual_traits column to store extracted visual features
+        try:
+            await db_manager.execute_update("""
+                ALTER TABLE user_avatars 
+                ADD COLUMN visual_traits TEXT DEFAULT NULL
+            """)
+            logger.info("Added visual_traits column to user_avatars table")
+        except Exception as e:
+            if "Duplicate column name" in str(e):
+                logger.info("Visual_traits column already exists in user_avatars table")
+            else:
+                logger.warning(f"Error adding visual_traits column: {str(e)}")
+        
         logger.info("Database migrations completed successfully!")
         
     except Exception as e:
@@ -570,7 +583,7 @@ async def get_new_stories_count(user_id: str = None) -> int:
         return 0
 
 # Avatar management functions
-async def create_user_avatar(user_id: int, avatar_name: str, traits_description: str, s3_image_url: str = "", status: str = "COMPLETED") -> int:
+async def create_user_avatar(user_id: int, avatar_name: str, traits_description: str, s3_image_url: str = "", status: str = "COMPLETED", visual_traits: str = None) -> int:
     """Create or update user avatar (limit one per user)."""
     try:
         logger.info(f"Creating avatar for user_id: {user_id}, name: {avatar_name}, status: {status}")
@@ -592,11 +605,11 @@ async def create_user_avatar(user_id: int, avatar_name: str, traits_description:
         
         # Create new avatar and get the ID in one transaction
         query = """
-        INSERT INTO user_avatars (user_id, avatar_name, traits_description, s3_image_url, status)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO user_avatars (user_id, avatar_name, traits_description, s3_image_url, status, visual_traits)
+        VALUES (%s, %s, %s, %s, %s, %s)
         """
         
-        params = (user_id, avatar_name, traits_description, s3_image_url or "", status)
+        params = (user_id, avatar_name, traits_description, s3_image_url or "", status, visual_traits)
         
         # Use a direct connection to get the insert ID
         async with db_manager.get_connection() as conn:
@@ -650,6 +663,39 @@ async def update_avatar_status(avatar_id: int, status: str, s3_image_url: str = 
         logger.error(f"Error updating avatar status: {str(e)}")
         raise
 
+async def update_avatar_status_with_traits(avatar_id: int, status: str, s3_image_url: str = None, visual_traits: str = None) -> bool:
+    """Update avatar status, S3 URL, and visual traits when generation is completed."""
+    try:
+        if s3_image_url and visual_traits:
+            query = """
+            UPDATE user_avatars 
+            SET status = %s, s3_image_url = %s, visual_traits = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """
+            params = (status, s3_image_url, visual_traits, avatar_id)
+        elif s3_image_url:
+            query = """
+            UPDATE user_avatars 
+            SET status = %s, s3_image_url = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """
+            params = (status, s3_image_url, avatar_id)
+        else:
+            query = """
+            UPDATE user_avatars 
+            SET status = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """
+            params = (status, avatar_id)
+        
+        await db_manager.execute_update(query, params)
+        logger.info(f"Avatar {avatar_id} status updated to: {status} with visual traits")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error updating avatar status with traits: {str(e)}")
+        raise
+
 async def get_completed_avatars_count(user_id: int) -> int:
     """Get count of completed avatars that haven't been viewed (similar to new stories)."""
     try:
@@ -668,7 +714,7 @@ async def get_user_avatar(user_id: int) -> dict:
     """Get user's active avatar."""
     try:
         query = """
-        SELECT id, avatar_name, traits_description, s3_image_url, status, created_at, updated_at
+        SELECT id, avatar_name, traits_description, s3_image_url, status, visual_traits, created_at, updated_at
         FROM user_avatars 
         WHERE user_id = %s AND is_active = TRUE
         ORDER BY created_at DESC
@@ -680,6 +726,24 @@ async def get_user_avatar(user_id: int) -> dict:
         
     except Exception as e:
         logger.error(f"Error fetching user avatar: {str(e)}")
+        return None
+
+async def get_user_avatar_by_name(user_id: int, avatar_name: str) -> dict:
+    """Get user's avatar by name for story generation."""
+    try:
+        query = """
+        SELECT id, avatar_name, traits_description, visual_traits, s3_image_url, status, created_at, updated_at
+        FROM user_avatars 
+        WHERE user_id = %s AND avatar_name = %s AND is_active = TRUE
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+        
+        results = await db_manager.execute_query(query, (user_id, avatar_name))
+        return results[0] if results else None
+        
+    except Exception as e:
+        logger.error(f"Error fetching user avatar by name: {str(e)}")
         return None
 
 async def update_user_avatar(user_id: int, avatar_name: str = None, traits_description: str = None) -> bool:
@@ -719,4 +783,61 @@ async def update_user_avatar(user_id: int, avatar_name: str = None, traits_descr
         
     except Exception as e:
         logger.error(f"Error updating user avatar: {str(e)}")
+        raise
+
+async def cleanup_invalid_stories() -> dict:
+    """Clean up stories with invalid or blank image URLs."""
+    try:
+        logger.info("Starting cleanup of invalid stories...")
+        
+        # First, get count of stories to be cleaned up
+        count_query = """
+        SELECT COUNT(*) as count FROM stories 
+        WHERE (
+            image_urls = '[]' OR 
+            image_urls = '' OR 
+            image_urls IS NULL OR
+            image_urls LIKE '%placeholder%' OR
+            image_urls LIKE '%Comic+Generation+Failed%' OR
+            image_urls LIKE '%Image+Upload+Disabled%' OR
+            image_urls LIKE '%No+Image+Data%' OR
+            title = 'Story in Progress...' OR
+            story_content = 'Your story is being generated...'
+        )
+        """
+        
+        count_result = await db_manager.execute_query(count_query)
+        count_to_delete = count_result[0]['count'] if count_result else 0
+        
+        if count_to_delete == 0:
+            logger.info("No invalid stories found to clean up")
+            return {"deleted_count": 0, "message": "No invalid stories found"}
+        
+        # Delete invalid stories
+        delete_query = """
+        DELETE FROM stories 
+        WHERE (
+            image_urls = '[]' OR 
+            image_urls = '' OR 
+            image_urls IS NULL OR
+            image_urls LIKE '%placeholder%' OR
+            image_urls LIKE '%Comic+Generation+Failed%' OR
+            image_urls LIKE '%Image+Upload+Disabled%' OR
+            image_urls LIKE '%No+Image+Data%' OR
+            title = 'Story in Progress...' OR
+            story_content = 'Your story is being generated...'
+        )
+        """
+        
+        deleted_rows = await db_manager.execute_update(delete_query)
+        
+        logger.info(f"Cleaned up {deleted_rows} invalid stories from database")
+        
+        return {
+            "deleted_count": deleted_rows,
+            "message": f"Successfully cleaned up {deleted_rows} invalid stories"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up invalid stories: {str(e)}")
         raise

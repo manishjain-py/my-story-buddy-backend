@@ -154,6 +154,7 @@ except Exception as e:
     logger.warning("2. Environment variables: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
     logger.warning("3. AWS credentials file: ~/.aws/credentials")
     logger.warning(f"4. Required permissions: s3:PutObject, s3:GetObject on bucket: {S3_BUCKET}")
+    s3_client = None
 
 # Models
 class StoryRequest(BaseModel):
@@ -233,6 +234,10 @@ async def save_image_to_s3(image_bytes: bytes, content_type: str = "image/png", 
     if s3_client is None:
         logger.warning(f"Request ID: {request_id} - S3 client not initialized, skipping image upload")
         return "https://via.placeholder.com/400x300?text=Image+Upload+Disabled"
+    
+    if not image_bytes:
+        logger.error(f"Request ID: {request_id} - No image bytes provided")
+        return "https://via.placeholder.com/400x300?text=No+Image+Data"
         
     try:
         start_time = time.time()
@@ -440,7 +445,7 @@ CONSISTENCY REMINDER: This is image {index+1} of 4 in the story series - charact
 '''
             
             image_response = await client.images.generate(
-                model="dall-e-3",
+                model="gpt-image-1",
                 prompt=visual_prompt,
                 n=1
             )
@@ -456,6 +461,13 @@ CONSISTENCY REMINDER: This is image {index+1} of 4 in the story series - charact
             
         except Exception as e:
             logger.error(f"Request ID: {request_id} - Error generating image {index+1}: {str(e)}")
+            logger.error(f"Request ID: {request_id} - Error type: {type(e).__name__}")
+            logger.error(f"Request ID: {request_id} - Full traceback: {traceback.format_exc()}")
+            
+            # Check if it's an OpenAI API error
+            if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                logger.error(f"Request ID: {request_id} - OpenAI API status code: {e.response.status_code}")
+            
             return index, "https://via.placeholder.com/400x300?text=Comic+Generation+Failed"
 
     # Create tasks for all 4 images
@@ -493,13 +505,94 @@ CONSISTENCY REMINDER: This is image {index+1} of 4 in the story series - charact
     
     return image_urls
 
+async def detect_avatar_names_in_prompt(prompt: str, user_id: int) -> dict:
+    """
+    Detect avatar names mentioned in the story prompt and fetch their traits.
+    Returns dict with avatar names as keys and their data as values.
+    """
+    if not user_id:
+        return {}
+    
+    try:
+        # Get user's avatar to check if their name is mentioned
+        from database import get_user_avatar
+        avatar_data = await get_user_avatar(user_id)
+        
+        if not avatar_data:
+            return {}
+        
+        avatar_name = avatar_data.get('avatar_name', '').strip()
+        if not avatar_name:
+            return {}
+        
+        # Simple name detection - check if avatar name appears in prompt (case-insensitive)
+        prompt_lower = prompt.lower()
+        avatar_name_lower = avatar_name.lower()
+        
+        if avatar_name_lower in prompt_lower:
+            logger.info(f"Detected avatar '{avatar_name}' mentioned in story prompt")
+            return {avatar_name: avatar_data}
+        
+        return {}
+        
+    except Exception as e:
+        logger.error(f"Error detecting avatar names in prompt: {str(e)}")
+        return {}
+
+async def enrich_prompt_with_avatar_traits(prompt: str, detected_avatars: dict) -> str:
+    """
+    Enrich the story prompt with visual and personality traits from detected avatars.
+    """
+    if not detected_avatars:
+        return prompt
+    
+    try:
+        enrichment_parts = []
+        
+        for avatar_name, avatar_data in detected_avatars.items():
+            # Build enrichment text
+            enrichment = f"\n\nCHARACTER DETAILS FOR {avatar_name}:\n"
+            
+            # Add personality traits
+            if avatar_data.get('traits_description'):
+                enrichment += f"Personality: {avatar_data['traits_description']}\n"
+            
+            # Add visual traits if available
+            if avatar_data.get('visual_traits'):
+                enrichment += f"Appearance: {avatar_data['visual_traits']}\n"
+            
+            enrichment += f"Please ensure {avatar_name} appears in the story with these specific traits and characteristics."
+            enrichment_parts.append(enrichment)
+        
+        # Combine original prompt with enrichment
+        enriched_prompt = prompt + "\n".join(enrichment_parts)
+        
+        logger.info(f"Enriched prompt with {len(detected_avatars)} avatar(s): {list(detected_avatars.keys())}")
+        return enriched_prompt
+        
+    except Exception as e:
+        logger.error(f"Error enriching prompt with avatar traits: {str(e)}")
+        return prompt
+
 async def generate_story_background_task(story_id: int, prompt: str, formats: list, request_id: str, user_id: str = None):
     """Background task to generate story content and update database."""
     try:
         logger.info(f"Request ID: {request_id} - Starting background story generation for story_id: {story_id}")
         
-        # Generate story content (same logic as original generateStory)
-        if not prompt.strip():
+        # Detect avatars mentioned in the prompt and enrich with their traits
+        detected_avatars = {}
+        enriched_prompt = prompt
+        
+        if user_id:
+            detected_avatars = await detect_avatar_names_in_prompt(prompt, user_id)
+            if detected_avatars:
+                enriched_prompt = await enrich_prompt_with_avatar_traits(prompt, detected_avatars)
+                logger.info(f"Request ID: {request_id} - Using enriched prompt with avatar details")
+            else:
+                logger.info(f"Request ID: {request_id} - No avatars detected in prompt")
+        
+        # Generate story content with enriched prompt
+        if not enriched_prompt.strip():
             logger.info(f"Request ID: {request_id} - Using default prompt")
             system_prompt = (
                 "You are a friendly and imaginative storyteller who creates elaborate, exciting, "
@@ -523,22 +616,7 @@ async def generate_story_background_task(story_id: int, prompt: str, formats: li
             )
             user_prompt = "Create a delightful story for young children"
         else:
-            logger.info(f"Request ID: {request_id} - Using custom prompt")
-            
-            # Check for personalized characters
-            personalized_prompt = ""
-            original_prompt = prompt.lower()
-            
-            if "aadyu" in original_prompt:
-                logger.info(f"Request ID: {request_id} - Detected personalized character: Aadyu")
-                personalized_prompt = (
-                    "\n\nIMPORTANT PERSONALIZATION: This story includes Aadyu, a special character. "
-                    "Aadyu is a funny, creative, and very smart boy who loves adventures. "
-                    "Make sure to include him as a main character in the story with these personality traits. "
-                    "Show his humor through clever jokes or funny situations, his creativity through "
-                    "unique problem-solving or imaginative ideas, and his intelligence through smart "
-                    "observations or helpful solutions to challenges in the story."
-                )
+            logger.info(f"Request ID: {request_id} - Using enriched prompt with avatar integration")
             
             system_prompt = (
                 "You are a friendly and imaginative storyteller who creates elaborate, exciting, "
@@ -559,9 +637,8 @@ async def generate_story_background_task(story_id: int, prompt: str, formats: li
                 "[Story content with multiple paragraphs]\n\n"
                 "The End! (Created By - MyStoryBuddy)\n\n"
                 "Use double line breaks between paragraphs. Create 8-12 paragraphs to tell the full adventure."
-                + personalized_prompt
             )
-            user_prompt = prompt
+            user_prompt = enriched_prompt
 
         # Generate story with OpenAI
         logger.info(f"Request ID: {request_id} - Generating story with GPT-4o...")
@@ -602,7 +679,7 @@ async def generate_story_background_task(story_id: int, prompt: str, formats: li
         image_urls = []
         if "Comic Book" in formats:
             logger.info(f"Request ID: {request_id} - Generating 4 comic images...")
-            image_urls = await generate_story_images(story, title, request_id, prompt)
+            image_urls = await generate_story_images(story, title, request_id, enriched_prompt)
             logger.info(f"Request ID: {request_id} - Images generated successfully")
         
         # Update story in database
@@ -628,6 +705,9 @@ async def generate_story_background_task(story_id: int, prompt: str, formats: li
         except Exception as db_error:
             logger.error(f"Failed to update story status after error: {str(db_error)}")
 
+# Cache to prevent duplicate story requests
+recent_requests = {}
+
 # Routes
 @app.post("/generateStory", response_model=AsyncStoryResponse)
 async def generate_story_async(request: StoryRequest, req: Request, background_tasks: BackgroundTasks):
@@ -644,6 +724,29 @@ async def generate_story_async(request: StoryRequest, req: Request, background_t
         log_request_details(req, request_id)
         logger.info(f"Request ID: {request_id} - Starting async story generation")
         logger.info(f"Request ID: {request_id} - Prompt: {request.prompt[:100]}...")
+        
+        # Check for duplicate requests (same user + prompt within 10 seconds)
+        user_id = current_user["id"] if current_user else None
+        request_key = f"{user_id}:{request.prompt.strip()}"
+        current_time = time.time()
+        
+        global recent_requests
+        if request_key in recent_requests:
+            time_diff = current_time - recent_requests[request_key]
+            if time_diff < 10:  # 10 seconds cooldown
+                logger.warning(f"Request ID: {request_id} - Duplicate request detected, ignoring")
+                raise HTTPException(
+                    status_code=429, 
+                    detail="Please wait a moment before generating another story with the same prompt"
+                )
+        
+        recent_requests[request_key] = current_time
+        
+        # Clean up old entries (older than 1 hour)
+        cutoff_time = current_time - 3600
+        keys_to_remove = [k for k, v in recent_requests.items() if v <= cutoff_time]
+        for key in keys_to_remove:
+            del recent_requests[key]
         
         # Create story placeholder in database
         from database import create_story_placeholder
@@ -1031,7 +1134,7 @@ async def preflight_my_stories():
         }
     )
 
-async def generate_comic_avatar(uploaded_image_bytes: bytes, avatar_name: str, traits_description: str, request_id: str) -> bytes:
+async def generate_comic_avatar(uploaded_image_bytes: bytes, avatar_name: str, traits_description: str, request_id: str) -> tuple[bytes, str]:
     """Generate a comic-style avatar using GPT-4 Vision to analyze uploaded image and DALL-E 3 to generate the avatar."""
     try:
         logger.info(f"Request ID: {request_id} - Starting comic avatar generation")
@@ -1055,6 +1158,35 @@ async def generate_comic_avatar(uploaded_image_bytes: bytes, avatar_name: str, t
         # First, use GPT-4 Vision to analyze the image and create a detailed description
         logger.info(f"Request ID: {request_id} - Analyzing uploaded photo with GPT-4 Vision...")
         
+        # Step 1: Extract visual traits for storage (separate call)
+        traits_response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Analyze this photo and extract key visual traits in a concise format for the character '{avatar_name}'. Focus on: hair (color, style), clothing (type, color), accessories (glasses, jewelry), distinctive features. Format as: 'Hair: [description], Clothing: [description], Accessories: [description], Features: [description]'. Keep it brief and specific."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}",
+                                "detail": "high"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=200,
+            temperature=0.1
+        )
+        
+        visual_traits = traits_response.choices[0].message.content
+        logger.info(f"Request ID: {request_id} - Visual traits extracted: {visual_traits}")
+        
+        # Step 2: Create detailed description for avatar generation
         vision_response = await client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -1063,7 +1195,7 @@ async def generate_comic_avatar(uploaded_image_bytes: bytes, avatar_name: str, t
                     "content": [
                         {
                             "type": "text",
-                            "text": f"Analyze this photo and create a detailed description for generating a comic-style avatar. Focus on facial features, hair, and distinctive characteristics. The avatar should be named '{avatar_name}' and have these traits: {traits_description}"
+                            "text": f"Analyze this photo and create a detailed description for generating a comic-style avatar. Focus on facial features, hair, and distinctive characteristics. The avatar should be named '{avatar_name}' and have these traits: {traits_description}. Make the description vivid and specific for image generation."
                         },
                         {
                             "type": "image_url",
@@ -1117,7 +1249,7 @@ The character's name is {avatar_name} and should look heroic and friendly.
         avatar_bytes = base64.b64decode(avatar_base64)
         
         logger.info(f"Request ID: {request_id} - Comic avatar generated successfully")
-        return avatar_bytes
+        return avatar_bytes, visual_traits
         
     except Exception as e:
         logger.error(f"Request ID: {request_id} - Error generating comic avatar: {str(e)}")
@@ -1131,17 +1263,17 @@ async def generate_avatar_background_task(avatar_id: int, image_bytes: bytes, av
     try:
         logger.info(f"Request ID: {request_id} - Starting background avatar generation for avatar_id: {avatar_id}")
         
-        # Generate comic-style avatar
-        avatar_image_bytes = await generate_comic_avatar(
+        # Generate comic-style avatar with visual traits extraction
+        avatar_image_bytes, visual_traits = await generate_comic_avatar(
             image_bytes, avatar_name, traits_description, request_id
         )
         
         # Save avatar image to S3
         avatar_s3_url = await save_avatar_to_s3(avatar_image_bytes, user_id, request_id)
         
-        # Update avatar status to completed with S3 URL
-        from database import update_avatar_status
-        await update_avatar_status(avatar_id, "COMPLETED", avatar_s3_url)
+        # Update avatar status to completed with S3 URL and visual traits
+        from database import update_avatar_status_with_traits
+        await update_avatar_status_with_traits(avatar_id, "COMPLETED", avatar_s3_url, visual_traits)
         
         logger.info(f"Request ID: {request_id} - Avatar generation completed successfully for avatar_id: {avatar_id}")
         
@@ -1265,21 +1397,22 @@ async def create_avatar(
         
         logger.info(f"Request ID: {request_id} - Image validation passed: {len(image_bytes)} bytes")
         
-        # Generate comic-style avatar
-        avatar_image_bytes = await generate_comic_avatar(
+        # Generate comic-style avatar with visual traits extraction
+        avatar_image_bytes, visual_traits = await generate_comic_avatar(
             image_bytes, avatar_name, traits_description, request_id
         )
         
         # Save avatar image to S3 with special path for avatars
         avatar_s3_url = await save_avatar_to_s3(avatar_image_bytes, user_id, request_id)
         
-        # Save avatar to database
+        # Save avatar to database with extracted visual traits
         from database import create_user_avatar
         avatar_id = await create_user_avatar(
             user_id=user_id,
             avatar_name=avatar_name,
             traits_description=traits_description,
-            s3_image_url=avatar_s3_url
+            s3_image_url=avatar_s3_url,
+            visual_traits=visual_traits
         )
         
         # Get the created avatar for response
@@ -1966,6 +2099,40 @@ async def catch_all(path: str, request: Request):
         from fastapi import BackgroundTasks
         background_tasks = BackgroundTasks()
         return await generate_story_async(StoryRequest(prompt=prompt), request, background_tasks)
+
+# Database cleanup endpoint
+@app.post("/admin/cleanup-stories")
+async def cleanup_invalid_stories_endpoint(req: Request):
+    """Admin endpoint to clean up invalid stories from the database."""
+    try:
+        # Optional: Add admin authentication here
+        # current_user = await get_current_user(req)
+        # if not current_user.get("is_admin"):
+        #     raise HTTPException(status_code=403, detail="Admin access required")
+        
+        from database import cleanup_invalid_stories
+        result = await cleanup_invalid_stories()
+        
+        return JSONResponse(
+            content=result,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in cleanup endpoint: {str(e)}")
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=500,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS", 
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
 
 # Create handler for AWS Lambda
 handler = Mangum(app) 
