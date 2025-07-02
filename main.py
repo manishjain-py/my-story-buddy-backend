@@ -366,35 +366,51 @@ async def generate_story_images(story: str, title: str, request_id: str, origina
     # Use the same title for all comic pages for consistency
     image_titles = [title, title, title, title]
     
-    # Generate a shared character design guide for consistency
+    # Generate character consistency guide using stored avatar references
     logger.info(f"Request ID: {request_id} - Generating character consistency guide...")
     consistency_start_time = time.time()
     
-    # Check for personalized characters
-    personalization_note = ""
-    if "aadyu" in original_prompt.lower() or "aadyu" in story.lower():
-        personalization_note = f'''
-
-IMPORTANT PERSONALIZATION: Include Aadyu as a main character in this comic.
-Aadyu should be depicted as a young boy who is funny, creative, and very smart.
-Reference this character design: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/personalised/aadyu.PNG
-Make Aadyu a central figure in the panels, showing his personality through expressions and actions.
-'''
+    # Extract character references from the enriched prompt
+    character_references = ""
+    if "CHARACTER DETAILS FOR" in original_prompt:
+        # Extract all character reference cards from the enriched prompt
+        import re
+        character_sections = re.findall(r'CHARACTER DETAILS FOR ([^:]+):(.*?)(?=CHARACTER DETAILS FOR|$)', original_prompt, re.DOTALL)
+        
+        if character_sections:
+            character_references = "\n\n=== STORED CHARACTER REFERENCES ===\n"
+            for char_name, char_details in character_sections:
+                character_references += f"\nCHARACTER: {char_name.strip()}\n{char_details.strip()}\n"
+            character_references += "\n=== END CHARACTER REFERENCES ===\n"
+            logger.info(f"Request ID: {request_id} - Found {len(character_sections)} character reference(s) for consistency")
     
     consistency_system_prompt = (
-        "You are an expert comic book artist. Create a detailed character and visual style guide "
-        "that will ensure perfect consistency across multiple comic panels. "
-        "Focus on character descriptions, color palette, and art style that must remain identical."
+        "You are an expert comic book artist specializing in character consistency. "
+        "Create a comprehensive visual style guide that ensures PERFECT consistency across multiple comic panels. "
+        "If character references are provided, use them EXACTLY as the definitive character descriptions. "
+        "Focus on maintaining identical character appearances, color palettes, and art style throughout all panels."
     )
     
     consistency_response = await client.chat.completions.create(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": consistency_system_prompt},
-            {"role": "user", "content": f"Create a visual consistency guide for this story:\n\n{story}{personalization_note}"}
+            {"role": "user", "content": f"""Create a detailed visual consistency guide for this story:
+
+STORY:
+{story}
+
+{character_references}
+
+REQUIREMENTS:
+- If character references are provided above, use them EXACTLY for character appearances
+- Create consistent art style notes for all characters and scenes
+- Specify color palettes that must remain identical across all panels
+- Note distinctive features that must appear in every panel featuring each character
+- Ensure the comic style is cute, child-friendly, and visually consistent"""}
         ],
-        max_tokens=400,
-        temperature=0.2
+        max_tokens=600,
+        temperature=0.1
     )
     
     character_guide = consistency_response.choices[0].message.content
@@ -419,7 +435,12 @@ STORY CONTENT:
 CHARACTER & STYLE CONSISTENCY GUIDE:
 {character_guide}
 
-CRITICAL: Follow the consistency guide exactly to ensure this image matches the other 3 comic images in the series.
+🎯 CRITICAL CHARACTER CONSISTENCY REQUIREMENTS:
+- Follow the character descriptions EXACTLY as specified in the consistency guide
+- If any named characters appear, they must match their reference descriptions PERFECTLY
+- Use the EXACT same facial features, hair, clothing, and distinctive marks
+- Maintain IDENTICAL color palettes for each character across all panels
+- Character proportions and art style must be consistent with previous images
 
 LAYOUT:
 - Create exactly 4 panels in a 2x2 grid layout
@@ -433,7 +454,13 @@ VISUAL REQUIREMENTS:
 - Use cute, friendly characters with big eyes and gentle expressions
 - Soft pastel colors and storybook-like visual style
 - Keep tone gentle, magical, and fun
-- Match this reference style: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg{personalization_note}
+- Match this reference style: https://mystorybuddy-assets.s3.us-east-1.amazonaws.com/PHOTO-2025-06-09-11-37-16.jpg
+
+CHARACTER VERIFICATION:
+- Before generating, verify each character matches their reference description
+- Pay special attention to: facial features, hair color/style, clothing, accessories
+- Ensure any named characters are instantly recognizable from their reference cards
+- Maintain character personality through expressions and body language
 
 STORY PROGRESSION:
 - Show this story section across all 4 panels
@@ -441,7 +468,7 @@ STORY PROGRESSION:
 - Clear visual storytelling suitable for children aged 3-5
 - Maintain narrative flow within the 4 panels
 
-CONSISTENCY REMINDER: This is image {index+1} of 4 in the story series - characters and style must be identical to other images.
+CONSISTENCY REMINDER: This is image {index+1} of 4 in the story series - characters must look IDENTICAL to the consistency guide and other images.
 '''
             
             image_response = await client.images.generate(
@@ -1158,7 +1185,7 @@ async def generate_comic_avatar(uploaded_image_bytes: bytes, avatar_name: str, t
         # First, use GPT-4 Vision to analyze the image and create a detailed description
         logger.info(f"Request ID: {request_id} - Analyzing uploaded photo with GPT-4 Vision...")
         
-        # Step 1: Extract visual traits for storage (separate call)
+        # Step 1: Extract comprehensive visual traits for perfect character consistency
         traits_response = await client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -1167,7 +1194,47 @@ async def generate_comic_avatar(uploaded_image_bytes: bytes, avatar_name: str, t
                     "content": [
                         {
                             "type": "text",
-                            "text": f"Analyze this photo and extract key visual traits in a concise format for the character '{avatar_name}'. Focus on: hair (color, style), clothing (type, color), accessories (glasses, jewelry), distinctive features. Format as: 'Hair: [description], Clothing: [description], Accessories: [description], Features: [description]'. Keep it brief and specific."
+                            "text": f"""Analyze this photo and create a comprehensive CHARACTER REFERENCE CARD for '{avatar_name}' that will ensure perfect visual consistency in comic-style illustrations.
+
+Extract detailed information in this EXACT format:
+
+=== CHARACTER REFERENCE CARD ===
+Name: {avatar_name}
+Art Style: Cute comic/cartoon style with soft colors
+
+PHYSICAL FEATURES:
+- Face Shape: [round/oval/square/heart/long - be specific]
+- Skin Tone: [exact description with undertones]
+- Eye Color: [specific color - brown/blue/green/hazel with details]
+- Eye Shape: [round/almond/wide/narrow - detailed description]
+- Eyebrows: [thick/thin/arched/straight - color and shape]
+- Nose: [small/large/button/straight/upturned - specific shape]
+- Mouth: [small/wide/full lips/thin lips - describe smile]
+
+HAIR DETAILS:
+- Color: [exact shade - not just "brown" but "dark chocolate brown" or "golden blonde"]
+- Texture: [straight/wavy/curly/coiled - degree of curl]
+- Length: [short/medium/long - exact length like "shoulder-length"]
+- Style: [specific cut/style - bangs, layers, parting side]
+- Volume: [thick/thin/voluminous/fine]
+
+CLOTHING & STYLE:
+- Top: [exact garment type, color, patterns, fit]
+- Colors: [dominant colors worn - list 2-3 main colors]
+- Style: [casual/formal/sporty/bohemian - fashion preference]
+
+DISTINCTIVE FEATURES:
+- Accessories: [glasses, jewelry, watches - be specific about style]
+- Facial Hair: [beard, mustache, stubble - exact style if present]
+- Unique Marks: [freckles, dimples, scars - any distinctive features]
+- Expression: [natural expression, smile type, eye expression]
+
+COMIC STYLE NOTES:
+- Key Features to Emphasize: [3 most distinctive features for recognition]
+- Color Palette: [main colors for this character]
+- Art Direction: [how to draw this character in comic style]
+
+This character should be instantly recognizable in any comic illustration through these specific details."""
                         },
                         {
                             "type": "image_url",
@@ -1179,7 +1246,7 @@ async def generate_comic_avatar(uploaded_image_bytes: bytes, avatar_name: str, t
                     ]
                 }
             ],
-            max_tokens=200,
+            max_tokens=800,
             temperature=0.1
         )
         
