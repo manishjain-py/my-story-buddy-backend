@@ -373,16 +373,34 @@ async def generate_story_images(story: str, title: str, request_id: str, origina
     # Extract character references from the enriched prompt
     character_references = ""
     if "CHARACTER DETAILS FOR" in original_prompt:
-        # Extract all character reference cards from the enriched prompt
-        import re
-        character_sections = re.findall(r'CHARACTER DETAILS FOR ([^:]+):(.*?)(?=CHARACTER DETAILS FOR|$)', original_prompt, re.DOTALL)
-        
-        if character_sections:
-            character_references = "\n\n=== STORED CHARACTER REFERENCES ===\n"
-            for char_name, char_details in character_sections:
-                character_references += f"\nCHARACTER: {char_name.strip()}\n{char_details.strip()}\n"
-            character_references += "\n=== END CHARACTER REFERENCES ===\n"
-            logger.info(f"Request ID: {request_id} - Found {len(character_sections)} character reference(s) for consistency")
+        try:
+            logger.info(f"Request ID: {request_id} - Found CHARACTER DETAILS in prompt, extracting references...")
+            # Log a snippet of the prompt for debugging
+            char_detail_start = original_prompt.find("CHARACTER DETAILS FOR")
+            prompt_snippet = original_prompt[char_detail_start:char_detail_start+200] if char_detail_start != -1 else "Not found"
+            logger.info(f"Request ID: {request_id} - Prompt snippet: {prompt_snippet}")
+            
+            # Extract all character reference cards from the enriched prompt
+            import re
+            # More flexible pattern to handle different formatting
+            character_sections = re.findall(r'CHARACTER DETAILS FOR\s+([^:\n]+):\s*(.*?)(?=CHARACTER DETAILS FOR|$)', original_prompt, re.DOTALL)
+            
+            if character_sections:
+                character_references = "\n\n=== STORED CHARACTER REFERENCES ===\n"
+                for char_name, char_details in character_sections:
+                    character_references += f"\nCHARACTER: {char_name.strip()}\n{char_details.strip()}\n"
+                character_references += "\n=== END CHARACTER REFERENCES ===\n"
+                logger.info(f"Request ID: {request_id} - Found {len(character_sections)} character reference(s) for consistency")
+            else:
+                logger.info(f"Request ID: {request_id} - No character sections matched the pattern, using fallback")
+                # Fall back to including the entire character section
+                if "Personality:" in original_prompt or "Appearance:" in original_prompt:
+                    character_references = f"\n\n=== CHARACTER INFORMATION ===\n{original_prompt[char_detail_start:]}\n=== END CHARACTER INFO ===\n"
+        except Exception as e:
+            logger.error(f"Request ID: {request_id} - Error extracting character references: {str(e)}")
+            # Fall back to simple character detection
+            if "Personality:" in original_prompt or "Appearance:" in original_prompt:
+                character_references = f"\n\n=== CHARACTER INFORMATION ===\n{original_prompt}\n=== END CHARACTER INFO ===\n"
     
     consistency_system_prompt = (
         "You are an expert comic book artist specializing in character consistency. "
