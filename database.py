@@ -205,7 +205,7 @@ async def create_tables():
             user_id INT NOT NULL,
             avatar_name VARCHAR(255) NOT NULL,
             traits_description TEXT,
-            s3_image_url VARCHAR(500) NOT NULL,
+            s3_image_url VARCHAR(500) DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             is_active BOOLEAN DEFAULT TRUE,
@@ -260,6 +260,41 @@ async def run_migrations():
                 logger.info("Status index already exists")
             else:
                 logger.warning(f"Error adding status index: {str(e)}")
+        
+        # Migration 3: Add status column to user_avatars table
+        try:
+            await db_manager.execute_update("""
+                ALTER TABLE user_avatars 
+                ADD COLUMN status ENUM('IN_PROGRESS', 'COMPLETED', 'FAILED') DEFAULT 'COMPLETED'
+            """)
+            logger.info("Added status column to user_avatars table")
+        except Exception as e:
+            if "Duplicate column name" in str(e):
+                logger.info("Status column already exists in user_avatars table")
+            else:
+                logger.warning(f"Error adding avatar status column: {str(e)}")
+        
+        # Migration 4: Add index for avatar status column
+        try:
+            await db_manager.execute_update("""
+                ALTER TABLE user_avatars ADD INDEX idx_avatar_status (status)
+            """)
+            logger.info("Added index for avatar status column")
+        except Exception as e:
+            if "Duplicate key name" in str(e):
+                logger.info("Avatar status index already exists")
+            else:
+                logger.warning(f"Error adding avatar status index: {str(e)}")
+        
+        # Migration 5: Modify s3_image_url to allow empty strings and set default
+        try:
+            await db_manager.execute_update("""
+                ALTER TABLE user_avatars 
+                MODIFY COLUMN s3_image_url VARCHAR(500) DEFAULT ''
+            """)
+            logger.info("Modified s3_image_url column to allow empty defaults")
+        except Exception as e:
+            logger.warning(f"Error modifying s3_image_url column: {str(e)}")
         
         logger.info("Database migrations completed successfully!")
         
@@ -535,40 +570,105 @@ async def get_new_stories_count(user_id: str = None) -> int:
         return 0
 
 # Avatar management functions
-async def create_user_avatar(user_id: int, avatar_name: str, traits_description: str, s3_image_url: str) -> int:
+async def create_user_avatar(user_id: int, avatar_name: str, traits_description: str, s3_image_url: str = "", status: str = "COMPLETED") -> int:
     """Create or update user avatar (limit one per user)."""
     try:
+        logger.info(f"Creating avatar for user_id: {user_id}, name: {avatar_name}, status: {status}")
+        
+        # Verify user exists first
+        user_check = await db_manager.execute_query(
+            "SELECT id FROM users WHERE id = %s", (user_id,)
+        )
+        if not user_check:
+            logger.error(f"User with id {user_id} does not exist")
+            raise ValueError(f"User with id {user_id} does not exist")
+        
         # First, deactivate any existing avatars for this user
-        await db_manager.execute_update(
+        deactivated_rows = await db_manager.execute_update(
             "UPDATE user_avatars SET is_active = FALSE WHERE user_id = %s",
             (user_id,)
         )
+        logger.info(f"Deactivated {deactivated_rows} existing avatars for user_id: {user_id}")
         
-        # Create new avatar
+        # Create new avatar and get the ID in one transaction
         query = """
-        INSERT INTO user_avatars (user_id, avatar_name, traits_description, s3_image_url)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO user_avatars (user_id, avatar_name, traits_description, s3_image_url, status)
+        VALUES (%s, %s, %s, %s, %s)
         """
         
-        params = (user_id, avatar_name, traits_description, s3_image_url)
-        await db_manager.execute_update(query, params)
+        params = (user_id, avatar_name, traits_description, s3_image_url or "", status)
         
-        # Get the inserted ID
-        result = await db_manager.execute_query("SELECT LAST_INSERT_ID() as id")
-        avatar_id = result[0]['id'] if result else None
+        # Use a direct connection to get the insert ID
+        async with db_manager.get_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, params)
+                avatar_id = cursor.lastrowid
+                logger.info(f"Insert executed, lastrowid: {avatar_id}, affected rows: {cursor.rowcount}")
+                
+                if not avatar_id:
+                    # Try LAST_INSERT_ID() as backup
+                    await cursor.execute("SELECT LAST_INSERT_ID() as id")
+                    result = await cursor.fetchone()
+                    avatar_id = result[0] if result else None
+                    logger.info(f"LAST_INSERT_ID() backup returned: {avatar_id}")
+                
+                if not avatar_id:
+                    logger.error(f"Failed to get avatar_id after insert for user_id: {user_id}")
+                    raise ValueError("Failed to get avatar_id after insert")
         
-        logger.info(f"Avatar created for user_id: {user_id}, avatar_id: {avatar_id}")
+        logger.info(f"Avatar created for user_id: {user_id}, avatar_id: {avatar_id}, status: {status}")
         return avatar_id
         
     except Exception as e:
         logger.error(f"Error creating user avatar: {str(e)}")
+        logger.error(f"Parameters: user_id={user_id}, avatar_name={avatar_name}, status={status}")
         raise
+
+async def update_avatar_status(avatar_id: int, status: str, s3_image_url: str = None) -> bool:
+    """Update avatar status and optionally the S3 URL when completed."""
+    try:
+        if s3_image_url:
+            query = """
+            UPDATE user_avatars 
+            SET status = %s, s3_image_url = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """
+            params = (status, s3_image_url, avatar_id)
+        else:
+            query = """
+            UPDATE user_avatars 
+            SET status = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """
+            params = (status, avatar_id)
+        
+        await db_manager.execute_update(query, params)
+        logger.info(f"Avatar {avatar_id} status updated to: {status}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error updating avatar status: {str(e)}")
+        raise
+
+async def get_completed_avatars_count(user_id: int) -> int:
+    """Get count of completed avatars that haven't been viewed (similar to new stories)."""
+    try:
+        query = """
+        SELECT COUNT(*) as count 
+        FROM user_avatars 
+        WHERE user_id = %s AND status = 'COMPLETED' AND is_active = TRUE
+        """
+        result = await db_manager.execute_query(query, (user_id,))
+        return result[0]['count'] if result else 0
+    except Exception as e:
+        logger.error(f"Error getting completed avatars count: {str(e)}")
+        return 0
 
 async def get_user_avatar(user_id: int) -> dict:
     """Get user's active avatar."""
     try:
         query = """
-        SELECT id, avatar_name, traits_description, s3_image_url, created_at, updated_at
+        SELECT id, avatar_name, traits_description, s3_image_url, status, created_at, updated_at
         FROM user_avatars 
         WHERE user_id = %s AND is_active = TRUE
         ORDER BY created_at DESC
