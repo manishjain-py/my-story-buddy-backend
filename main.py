@@ -1208,13 +1208,19 @@ async def generate_comic_avatar(uploaded_image_bytes: bytes, avatar_name: str, t
             model="gpt-4o",
             messages=[
                 {
+                    "role": "system",
+                    "content": "You are a concept artist and character designer helping create fictional characters for comic books and cartoons. Your job is to analyze reference artwork and create detailed character design specifications for consistent artistic representation. You work with concept art, reference images, and design materials to help artists create fictional characters."
+                },
+                {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": f"""I need to create a detailed CHARACTER REFERENCE SHEET for a comic book character named '{avatar_name}'. Please observe the visual elements in this reference image and describe them as artistic/design specifications for creating a consistent cartoon character.
+                            "text": f"""I need a CHARACTER DESIGN SPECIFICATION for my comic book character '{avatar_name}'. This concept art reference shows the visual style I want to achieve.
 
-Create a comprehensive design specification in this EXACT format:
+Please analyze this artwork and create detailed design notes that my art team can use to draw this fictional character consistently across multiple comic panels.
+
+Create the design specification in this EXACT format:
 
 === CHARACTER REFERENCE CARD ===
 Name: {avatar_name}
@@ -1276,11 +1282,15 @@ This is for creating a consistent fictional character design based on these visu
             model="gpt-4o",
             messages=[
                 {
+                    "role": "system",
+                    "content": "You are a concept artist and character designer creating fictional characters for comic books. You specialize in analyzing reference artwork and creating detailed descriptions for digital art generation."
+                },
+                {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": f"I need to create a comic-style avatar character named '{avatar_name}' with these personality traits: {traits_description}. Please describe the visual design elements in this reference image that would help create a cartoon character design. Focus on artistic elements like facial structure, hair design, clothing style, and distinctive visual features that would make for a recognizable comic book character. Provide a detailed description suitable for digital art generation."
+                            "text": f"I'm designing a comic book character named '{avatar_name}' with these personality traits: {traits_description}. This concept art reference shows the visual style I want to achieve. Please create a detailed artistic description that my digital artist can use to generate a cartoon avatar. Focus on design elements like facial structure, hair styling, outfit design, and distinctive artistic features that would make this fictional character recognizable in comic book style."
                         },
                         {
                             "type": "image_url",
