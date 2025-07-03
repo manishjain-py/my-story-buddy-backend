@@ -1212,47 +1212,47 @@ async def generate_comic_avatar(uploaded_image_bytes: bytes, avatar_name: str, t
                     "content": [
                         {
                             "type": "text",
-                            "text": f"""Analyze this photo and create a comprehensive CHARACTER REFERENCE CARD for '{avatar_name}' that will ensure perfect visual consistency in comic-style illustrations.
+                            "text": f"""I need to create a detailed CHARACTER REFERENCE SHEET for a comic book character named '{avatar_name}'. Please observe the visual elements in this reference image and describe them as artistic/design specifications for creating a consistent cartoon character.
 
-Extract detailed information in this EXACT format:
+Create a comprehensive design specification in this EXACT format:
 
 === CHARACTER REFERENCE CARD ===
 Name: {avatar_name}
 Art Style: Cute comic/cartoon style with soft colors
 
-PHYSICAL FEATURES:
-- Face Shape: [round/oval/square/heart/long - be specific]
-- Skin Tone: [exact description with undertones]
-- Eye Color: [specific color - brown/blue/green/hazel with details]
-- Eye Shape: [round/almond/wide/narrow - detailed description]
-- Eyebrows: [thick/thin/arched/straight - color and shape]
-- Nose: [small/large/button/straight/upturned - specific shape]
-- Mouth: [small/wide/full lips/thin lips - describe smile]
+PHYSICAL DESIGN ELEMENTS:
+- Face Shape: [describe the geometric shape - round/oval/square/heart/diamond]
+- Skin Tone: [describe color/shade for art purposes]
+- Eye Design: [color, size, shape - for character design]
+- Eye Shape: [artistic style - round/almond/wide/narrow]
+- Eyebrow Style: [thickness, arch, color - for drawing reference]
+- Nose Design: [artistic style - small/button/straight/upturned]
+- Mouth Design: [size, style - for character expressions]
 
-HAIR DETAILS:
-- Color: [exact shade - not just "brown" but "dark chocolate brown" or "golden blonde"]
-- Texture: [straight/wavy/curly/coiled - degree of curl]
-- Length: [short/medium/long - exact length like "shoulder-length"]
-- Style: [specific cut/style - bangs, layers, parting side]
-- Volume: [thick/thin/voluminous/fine]
+HAIR DESIGN:
+- Hair Color: [specific artistic color - "warm brown", "golden blonde", "jet black"]
+- Hair Texture: [artistic texture - straight/wavy/curly/coiled]
+- Hair Length: [design specification - short/medium/long/shoulder-length]
+- Hair Style: [cut/style - bangs, layers, parting for character design]
+- Hair Volume: [artistic volume - thick/thin/voluminous/fine]
 
-CLOTHING & STYLE:
-- Top: [exact garment type, color, patterns, fit]
-- Colors: [dominant colors worn - list 2-3 main colors]
-- Style: [casual/formal/sporty/bohemian - fashion preference]
+CLOTHING DESIGN:
+- Outfit Style: [describe garments visible for character design]
+- Color Scheme: [primary colors for costume/outfit design]
+- Fashion Style: [design aesthetic - casual/formal/sporty/artistic]
 
-DISTINCTIVE FEATURES:
-- Accessories: [glasses, jewelry, watches - be specific about style]
-- Facial Hair: [beard, mustache, stubble - exact style if present]
-- Unique Marks: [freckles, dimples, scars - any distinctive features]
-- Expression: [natural expression, smile type, eye expression]
+CHARACTER DESIGN FEATURES:
+- Accessories: [design elements - glasses style, jewelry, etc.]
+- Facial Details: [design elements like facial hair, distinctive marks]
+- Unique Design Elements: [artistic features that make character recognizable]
+- Default Expression: [character's typical expression for consistent portrayal]
 
-COMIC STYLE NOTES:
-- Key Features to Emphasize: [3 most distinctive features for recognition]
-- Color Palette: [main colors for this character]
-- Art Direction: [how to draw this character in comic style]
+COMIC ART SPECIFICATIONS:
+- Key Visual Elements: [3 main features for character recognition in comics]
+- Character Color Palette: [primary colors for this character's design]
+- Art Style Notes: [how to draw this character consistently in comic panels]
 
-This character should be instantly recognizable in any comic illustration through these specific details."""
+This is for creating a consistent fictional character design based on these visual reference elements."""
                         },
                         {
                             "type": "image_url",
@@ -1280,7 +1280,7 @@ This character should be instantly recognizable in any comic illustration throug
                     "content": [
                         {
                             "type": "text",
-                            "text": f"Analyze this photo and create a detailed description for generating a comic-style avatar. Focus on facial features, hair, and distinctive characteristics. The avatar should be named '{avatar_name}' and have these traits: {traits_description}. Make the description vivid and specific for image generation."
+                            "text": f"I need to create a comic-style avatar character named '{avatar_name}' with these personality traits: {traits_description}. Please describe the visual design elements in this reference image that would help create a cartoon character design. Focus on artistic elements like facial structure, hair design, clothing style, and distinctive visual features that would make for a recognizable comic book character. Provide a detailed description suitable for digital art generation."
                         },
                         {
                             "type": "image_url",
