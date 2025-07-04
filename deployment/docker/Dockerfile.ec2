@@ -9,16 +9,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
-COPY requirements.txt .
+COPY config/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY main.py .
-COPY auth_routes.py .
-COPY auth_models.py .
-COPY auth_utils.py .
-COPY database.py .
-COPY email_service.py .
+COPY src/ ./src/
+
+# Set Python path to include src directory
+ENV PYTHONPATH=/app/src
 
 # Expose port
 EXPOSE 8003

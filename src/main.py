@@ -17,15 +17,13 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import AsyncOpenAI
-from mangum import Mangum
 from PIL import Image
 
 # Import authentication modules (required for proper functionality)
-from auth_routes import auth_router
-# from google_auth import google_router  # Temporarily disabled due to cryptography dependency
-from auth_models import UserDatabase
-from auth_utils import get_optional_user, get_current_user
-from database import db_manager
+from auth.auth_routes import auth_router
+from auth.auth_models import UserDatabase
+from auth.auth_utils import get_optional_user, get_current_user
+from core.database import db_manager
 
 # Configure logging
 logging.basicConfig(
@@ -46,7 +44,6 @@ app = FastAPI(
 
 # Include authentication routes
 app.include_router(auth_router)
-# app.include_router(google_router)  # Temporarily disabled due to cryptography dependency
 logger.info("Authentication routes included")
 
 # Configure CORS for production and development
@@ -87,7 +84,7 @@ async def startup_event():
         await db_manager.initialize()
         
         # Create all tables
-        from database import create_tables
+        from core.database import create_tables
         await create_tables()
         
         # Create authentication tables
@@ -560,7 +557,7 @@ async def detect_avatar_names_in_prompt(prompt: str, user_id: int) -> dict:
     
     try:
         # Get user's avatar to check if their name is mentioned
-        from database import get_user_avatar
+        from core.database import get_user_avatar
         avatar_data = await get_user_avatar(user_id)
         
         if not avatar_data:
@@ -728,7 +725,7 @@ async def generate_story_background_task(story_id: int, prompt: str, formats: li
             logger.info(f"Request ID: {request_id} - Images generated successfully")
         
         # Update story in database
-        from database import update_story_content
+        from core.database import update_story_content
         success = await update_story_content(story_id, title, story, image_urls, status='NEW')
         
         if success:
@@ -743,7 +740,7 @@ async def generate_story_background_task(story_id: int, prompt: str, formats: li
         
         # Mark story as failed or keep as IN_PROGRESS for retry
         try:
-            from database import update_story_content
+            from core.database import update_story_content
             await update_story_content(story_id, "Story Generation Failed", 
                                      "We encountered an error while generating your story. Please try again.", 
                                      [], status='NEW')
@@ -794,7 +791,7 @@ async def generate_story_async(request: StoryRequest, req: Request, background_t
             del recent_requests[key]
         
         # Create story placeholder in database
-        from database import create_story_placeholder
+        from core.database import create_story_placeholder
         user_id = current_user["id"] if current_user else None
         story_id = await create_story_placeholder(
             prompt=request.prompt,
@@ -847,7 +844,7 @@ async def get_story_status(story_id: int, req: Request):
     try:
         logger.info(f"Request ID: {request_id} - Getting status for story_id: {story_id}")
         
-        from database import get_story_by_id
+        from core.database import get_story_by_id
         story = await get_story_by_id(story_id)
         
         if not story:
@@ -892,7 +889,7 @@ async def mark_story_viewed(story_id: int, req: Request):
     try:
         logger.info(f"Request ID: {request_id} - Marking story_id: {story_id} as viewed")
         
-        from database import update_story_status
+        from core.database import update_story_status
         success = await update_story_status(story_id, 'VIEWED')
         
         if not success:
@@ -1007,7 +1004,7 @@ async def generate_fun_facts(request: FunFactRequest, req: Request):
         # Save fun facts to database (if available)
         if current_user and db_manager:
             try:
-                from database import save_fun_facts
+                from core.database import save_fun_facts
                 facts_data = [{"question": fact.question, "answer": fact.answer} for fact in facts]
                 fun_facts_id = await save_fun_facts(
                     prompt=request.prompt,
@@ -1086,7 +1083,7 @@ async def get_user_stories(req: Request):
             )
         
         # Verify JWT token
-        from auth_utils import JWTUtils
+        from auth.auth_utils import JWTUtils
         payload = JWTUtils.verify_token(token)
         if payload is None:
             return JSONResponse(
@@ -1112,7 +1109,7 @@ async def get_user_stories(req: Request):
             )
         
         # Get user from database
-        from auth_models import UserDatabase
+        from auth.auth_models import UserDatabase
         current_user = await UserDatabase.get_user_by_id(user_id)
         if current_user is None:
             return JSONResponse(
@@ -1125,7 +1122,7 @@ async def get_user_stories(req: Request):
                 }
             )
         
-        from database import get_stories_with_status, get_new_stories_count
+        from core.database import get_stories_with_status, get_new_stories_count
         stories = await get_stories_with_status(user_id=str(current_user["id"]), limit=50)
         new_stories_count = await get_new_stories_count(user_id=str(current_user["id"]))
         
@@ -1335,7 +1332,7 @@ async def generate_avatar_background_task(avatar_id: int, image_bytes: bytes, av
         avatar_s3_url = await save_avatar_to_s3(avatar_image_bytes, user_id, request_id)
         
         # Update avatar status to completed with S3 URL and visual traits
-        from database import update_avatar_status_with_traits
+        from core.database import update_avatar_status_with_traits
         await update_avatar_status_with_traits(avatar_id, "COMPLETED", avatar_s3_url, visual_traits)
         
         logger.info(f"Request ID: {request_id} - Avatar generation completed successfully for avatar_id: {avatar_id}")
@@ -1344,7 +1341,7 @@ async def generate_avatar_background_task(avatar_id: int, image_bytes: bytes, av
         logger.error(f"Request ID: {request_id} - Error in background avatar generation: {str(e)}")
         # Update avatar status to failed
         try:
-            from database import update_avatar_status
+            from core.database import update_avatar_status
             await update_avatar_status(avatar_id, "FAILED")
         except Exception as update_e:
             logger.error(f"Request ID: {request_id} - Failed to update avatar status to FAILED: {str(update_e)}")
@@ -1388,7 +1385,7 @@ async def create_avatar(
             )
         
         # Verify JWT token
-        from auth_utils import JWTUtils
+        from auth.auth_utils import JWTUtils
         payload = JWTUtils.verify_token(token)
         if payload is None:
             return JSONResponse(
@@ -1414,7 +1411,7 @@ async def create_avatar(
             )
         
         # Get user from database
-        from auth_models import UserDatabase
+        from auth.auth_models import UserDatabase
         current_user = await UserDatabase.get_user_by_id(user_id)
         if current_user is None:
             return JSONResponse(
@@ -1469,7 +1466,7 @@ async def create_avatar(
         avatar_s3_url = await save_avatar_to_s3(avatar_image_bytes, user_id, request_id)
         
         # Save avatar to database with extracted visual traits
-        from database import create_user_avatar
+        from core.database import create_user_avatar
         avatar_id = await create_user_avatar(
             user_id=user_id,
             avatar_name=avatar_name,
@@ -1479,7 +1476,7 @@ async def create_avatar(
         )
         
         # Get the created avatar for response
-        from database import get_user_avatar
+        from core.database import get_user_avatar
         avatar_data = await get_user_avatar(user_id)
         
         if not avatar_data:
@@ -1582,7 +1579,7 @@ async def get_avatar(req: Request):
             )
         
         # Verify JWT token
-        from auth_utils import JWTUtils
+        from auth.auth_utils import JWTUtils
         payload = JWTUtils.verify_token(token)
         if payload is None:
             return JSONResponse(
@@ -1608,7 +1605,7 @@ async def get_avatar(req: Request):
             )
         
         # Get user from database
-        from auth_models import UserDatabase
+        from auth.auth_models import UserDatabase
         current_user = await UserDatabase.get_user_by_id(user_id)
         if current_user is None:
             return JSONResponse(
@@ -1625,7 +1622,7 @@ async def get_avatar(req: Request):
         
         logger.info(f"Request ID: {request_id} - Getting avatar for user_id: {user_id}")
         
-        from database import get_user_avatar
+        from core.database import get_user_avatar
         avatar_data = await get_user_avatar(user_id)
         
         if not avatar_data:
@@ -1697,7 +1694,7 @@ async def update_avatar(req: Request, update_data: AvatarUpdateRequest):
             )
         
         # Verify JWT token
-        from auth_utils import JWTUtils
+        from auth.auth_utils import JWTUtils
         payload = JWTUtils.verify_token(token)
         if payload is None:
             return JSONResponse(
@@ -1723,7 +1720,7 @@ async def update_avatar(req: Request, update_data: AvatarUpdateRequest):
             )
         
         # Get user from database
-        from auth_models import UserDatabase
+        from auth.auth_models import UserDatabase
         current_user = await UserDatabase.get_user_by_id(user_id)
         if current_user is None:
             return JSONResponse(
@@ -1740,7 +1737,7 @@ async def update_avatar(req: Request, update_data: AvatarUpdateRequest):
         
         logger.info(f"Request ID: {request_id} - Updating avatar for user_id: {user_id}")
         
-        from database import update_user_avatar
+        from core.database import update_user_avatar
         success = await update_user_avatar(
             user_id=user_id,
             avatar_name=update_data.avatar_name,
@@ -1759,7 +1756,7 @@ async def update_avatar(req: Request, update_data: AvatarUpdateRequest):
             )
         
         # Get updated avatar data
-        from database import get_user_avatar
+        from core.database import get_user_avatar
         avatar_data = await get_user_avatar(user_id)
         
         response_data = {
@@ -1837,7 +1834,7 @@ async def create_avatar_async(
             )
         
         # Verify JWT token
-        from auth_utils import JWTUtils
+        from auth.auth_utils import JWTUtils
         payload = JWTUtils.verify_token(token)
         if payload is None:
             return JSONResponse(
@@ -1863,7 +1860,7 @@ async def create_avatar_async(
             )
         
         # Get user from database
-        from auth_models import UserDatabase
+        from auth.auth_models import UserDatabase
         current_user = await UserDatabase.get_user_by_id(user_id)
         if current_user is None:
             return JSONResponse(
@@ -1901,7 +1898,7 @@ async def create_avatar_async(
         logger.info(f"Request ID: {request_id} - Image validation passed: {len(image_bytes)} bytes")
         
         # Create avatar placeholder in database with IN_PROGRESS status
-        from database import create_user_avatar
+        from core.database import create_user_avatar
         try:
             avatar_id = await create_user_avatar(
                 user_id=user_id,
@@ -1984,7 +1981,7 @@ async def get_avatar_status(avatar_id: int, req: Request):
             )
         
         # Verify JWT token
-        from auth_utils import JWTUtils
+        from auth.auth_utils import JWTUtils
         payload = JWTUtils.verify_token(token)
         if payload is None:
             return JSONResponse(
@@ -2010,7 +2007,7 @@ async def get_avatar_status(avatar_id: int, req: Request):
             )
         
         # Get avatar from database
-        from database import get_user_avatar
+        from core.database import get_user_avatar
         avatar_data = await get_user_avatar(user_id)
         
         if not avatar_data:
@@ -2091,7 +2088,7 @@ async def get_completed_avatars_count(req: Request):
             )
         
         # Verify JWT token
-        from auth_utils import JWTUtils
+        from auth.auth_utils import JWTUtils
         payload = JWTUtils.verify_token(token)
         if payload is None:
             return JSONResponse(
@@ -2117,7 +2114,7 @@ async def get_completed_avatars_count(req: Request):
             )
         
         # Get completed avatars count
-        from database import get_completed_avatars_count
+        from core.database import get_completed_avatars_count
         completed_count = await get_completed_avatars_count(user_id)
         
         return JSONResponse(
@@ -2173,7 +2170,7 @@ async def cleanup_invalid_stories_endpoint(req: Request):
         # if not current_user.get("is_admin"):
         #     raise HTTPException(status_code=403, detail="Admin access required")
         
-        from database import cleanup_invalid_stories
+        from core.database import cleanup_invalid_stories
         result = await cleanup_invalid_stories()
         
         return JSONResponse(
@@ -2197,5 +2194,4 @@ async def cleanup_invalid_stories_endpoint(req: Request):
             }
         )
 
-# Create handler for AWS Lambda
-handler = Mangum(app) 
+ 

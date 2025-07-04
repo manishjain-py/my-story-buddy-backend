@@ -8,15 +8,15 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials
 import re
 
-from auth_models import (
+from auth.auth_models import (
     UserSignup, UserLogin, OTPRequest, OTPVerification, 
     Token, UserDatabase, AuthType
 )
-from auth_utils import (
+from auth.auth_utils import (
     PasswordUtils, JWTUtils, OTPUtils, ValidationUtils,
     create_user_token, get_current_user, security
 )
-from email_service import email_service
+from core.email_service import email_service
 
 logger = logging.getLogger(__name__)
 
@@ -327,7 +327,7 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
     Get current user information
     """
     try:
-        from auth_models import UserResponse, AuthType
+        from auth.auth_models import UserResponse, AuthType
         
         user_response = UserResponse(
             id=current_user["id"],

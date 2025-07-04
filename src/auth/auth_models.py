@@ -59,7 +59,7 @@ class UserDatabase:
     @staticmethod
     async def create_user_tables():
         """Create user-related database tables"""
-        from database import db_manager
+        from core.database import db_manager
         
         # Users table
         users_table = """
@@ -125,7 +125,7 @@ class UserDatabase:
                          password_hash: Optional[str] = None, auth_type: AuthType = AuthType.EMAIL_PASSWORD,
                          google_id: Optional[str] = None) -> Optional[int]:
         """Create a new user in the database"""
-        from database import db_manager
+        from core.database import db_manager
         
         query = """
         INSERT INTO users (email, password_hash, first_name, last_name, auth_type, google_id, is_verified)
@@ -159,7 +159,7 @@ class UserDatabase:
     @staticmethod
     async def get_user_by_email(email: str) -> Optional[dict]:
         """Get user by email address"""
-        from database import db_manager
+        from core.database import db_manager
         
         query = """
         SELECT id, email, password_hash, first_name, last_name, auth_type, 
@@ -174,7 +174,7 @@ class UserDatabase:
     @staticmethod
     async def get_user_by_id(user_id: int) -> Optional[dict]:
         """Get user by ID"""
-        from database import db_manager
+        from core.database import db_manager
         
         query = """
         SELECT id, email, password_hash, first_name, last_name, auth_type, 
@@ -189,7 +189,7 @@ class UserDatabase:
     @staticmethod
     async def get_user_by_google_id(google_id: str) -> Optional[dict]:
         """Get user by Google ID"""
-        from database import db_manager
+        from core.database import db_manager
         
         query = """
         SELECT id, email, password_hash, first_name, last_name, auth_type, 
@@ -204,7 +204,7 @@ class UserDatabase:
     @staticmethod
     async def update_last_login(user_id: int):
         """Update user's last login timestamp"""
-        from database import db_manager
+        from core.database import db_manager
         
         query = "UPDATE users SET last_login = NOW() WHERE id = %s"
         await db_manager.execute_update(query, (user_id,))
@@ -212,7 +212,7 @@ class UserDatabase:
     @staticmethod
     async def store_otp(email: str, otp_code: str, expires_in_minutes: int = 5):
         """Store OTP for email verification"""
-        from database import db_manager
+        from core.database import db_manager
         
         # First, mark any existing OTPs for this email as used
         await db_manager.execute_update(
@@ -231,7 +231,7 @@ class UserDatabase:
     @staticmethod
     async def verify_otp(email: str, otp_code: str) -> bool:
         """Verify OTP and mark as used"""
-        from database import db_manager
+        from core.database import db_manager
         
         # Check if valid OTP exists
         query = """
@@ -255,7 +255,7 @@ class UserDatabase:
     async def create_auth_session(user_id: int, session_token: str, expires_at: datetime,
                                  device_info: Optional[str] = None, ip_address: Optional[str] = None):
         """Create user authentication session"""
-        from database import db_manager
+        from core.database import db_manager
         
         query = """
         INSERT INTO user_auth_sessions (user_id, session_token, device_info, ip_address, expires_at)
@@ -267,7 +267,7 @@ class UserDatabase:
     @staticmethod
     async def verify_auth_session(session_token: str) -> Optional[dict]:
         """Verify authentication session"""
-        from database import db_manager
+        from core.database import db_manager
         
         query = """
         SELECT s.user_id, s.expires_at, u.email, u.first_name, u.last_name, u.auth_type, u.is_active
@@ -282,7 +282,7 @@ class UserDatabase:
     @staticmethod
     async def invalidate_auth_session(session_token: str):
         """Invalidate authentication session"""
-        from database import db_manager
+        from core.database import db_manager
         
         query = "UPDATE user_auth_sessions SET is_active = FALSE WHERE session_token = %s"
         await db_manager.execute_update(query, (session_token,))

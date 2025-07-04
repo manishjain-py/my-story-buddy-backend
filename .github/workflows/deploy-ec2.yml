@@ -35,8 +35,8 @@ jobs:
       run: |
         # Build Docker image using EC2-specific Dockerfile
         echo "🔨 Building Docker image for EC2..."
-        docker build --platform linux/amd64 -f Dockerfile.ec2 -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-        docker build --platform linux/amd64 -f Dockerfile.ec2 -t $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA .
+        docker build --platform linux/amd64 -f deployment/docker/Dockerfile.ec2 -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+        docker build --platform linux/amd64 -f deployment/docker/Dockerfile.ec2 -t $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA .
         
         # Push images
         echo "📤 Pushing images to ECR..."
@@ -52,7 +52,7 @@ jobs:
         host: ${{ secrets.EC2_HOST }}
         username: ec2-user
         key: ${{ secrets.EC2_SSH_KEY }}
-        source: "docker-compose.production.yml,setup-https.sh,nginx.conf,nginx-api-path.conf,setup-letsencrypt.sh"
+        source: "deployment/docker/docker-compose.production.yml,deployment/scripts/setup-https.sh,deployment/nginx/nginx.conf,deployment/nginx/nginx-api-path.conf,deployment/scripts/setup-letsencrypt-fixed.sh"
         target: "/opt/my-story-buddy/"
         strip_components: 0
 
@@ -73,9 +73,9 @@ jobs:
           echo "📋 Verifying deployment files..."
           ls -la
           echo "Files present:"
-          [ -f docker-compose.production.yml ] && echo "✅ docker-compose.production.yml" || echo "❌ docker-compose.production.yml"
-          [ -f setup-https.sh ] && echo "✅ setup-https.sh" || echo "❌ setup-https.sh"
-          [ -f nginx.conf ] && echo "✅ nginx.conf" || echo "❌ nginx.conf"
+          [ -f deployment/docker/docker-compose.production.yml ] && echo "✅ docker-compose.production.yml" || echo "❌ docker-compose.production.yml"
+          [ -f deployment/scripts/setup-https.sh ] && echo "✅ setup-https.sh" || echo "❌ setup-https.sh"
+          [ -f deployment/nginx/nginx.conf ] && echo "✅ nginx.conf" || echo "❌ nginx.conf"
           
           # Configure AWS credentials for ECR access
           echo "🔐 Configuring AWS credentials..."
@@ -108,16 +108,16 @@ jobs:
           # Set up HTTPS with nginx if not already configured
           if ! sudo systemctl is-active --quiet nginx; then
             echo "🔐 Setting up HTTPS with nginx..."
-            chmod +x setup-https.sh
-            ./setup-https.sh
+            chmod +x deployment/scripts/setup-https.sh
+            ./deployment/scripts/setup-https.sh
           else
             echo "✅ HTTPS already configured"
           fi
           
           # Use production docker-compose file
           echo "📋 Using production docker-compose configuration..."
-          if [ -f docker-compose.production.yml ]; then
-            ln -sf docker-compose.production.yml docker-compose.yml
+          if [ -f deployment/docker/docker-compose.production.yml ]; then
+            ln -sf deployment/docker/docker-compose.production.yml docker-compose.yml
           fi
           
           # Pull latest image
@@ -135,7 +135,7 @@ jobs:
           
           # Update nginx configuration for CloudFront routing
           echo "🔧 Updating nginx configuration for CloudFront routing..."
-          sudo cp nginx-api-path.conf /etc/nginx/conf.d/mystorybuddy.conf
+          sudo cp deployment/nginx/nginx-api-path.conf /etc/nginx/conf.d/mystorybuddy.conf
           sudo nginx -t
           
           # Ensure system nginx is running and configured

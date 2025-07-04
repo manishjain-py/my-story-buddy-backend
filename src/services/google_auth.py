@@ -9,9 +9,9 @@ import httpx
 from fastapi import HTTPException, status, Request
 from authlib.integrations.starlette_client import OAuth
 
-from auth_models import UserDatabase, AuthType
-from auth_utils import create_user_token
-from email_service import email_service
+from auth.auth_models import UserDatabase, AuthType
+from auth.auth_utils import create_user_token
+from core.email_service import email_service
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ class GoogleOAuth:
                 if user:
                     # User exists with email but no Google ID - link accounts
                     # Update user with Google ID
-                    from database import db_manager
+                    from core.database import db_manager
                     await db_manager.execute_update(
                         "UPDATE users SET google_id = %s, auth_type = %s WHERE id = %s",
                         (google_id, AuthType.GOOGLE.value, user['id'])

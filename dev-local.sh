@@ -59,7 +59,7 @@ docker rm $CONTAINER_NAME 2>/dev/null || true
 
 # Build the Docker image
 echo -e "${YELLOW}🔨 Building Docker image...${NC}"
-docker build -f Dockerfile.ec2 -t $IMAGE_NAME . --no-cache
+docker build -f deployment/docker/Dockerfile.ec2 -t $IMAGE_NAME . --no-cache
 
 # Start the container
 echo -e "${YELLOW}🐳 Starting container...${NC}"

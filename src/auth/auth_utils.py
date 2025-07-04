@@ -171,7 +171,7 @@ class ValidationUtils:
 # Token creation helper
 async def create_user_token(user_data: dict) -> dict:
     """Create authentication token for user"""
-    from auth_models import UserResponse, AuthType
+    from auth.auth_models import UserResponse, AuthType
     
     # Create JWT payload
     token_data = {
@@ -187,7 +187,7 @@ async def create_user_token(user_data: dict) -> dict:
     session_token = SessionUtils.generate_session_token()
     
     # Store session in database
-    from auth_models import UserDatabase
+    from auth.auth_models import UserDatabase
     expires_at = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     
     await UserDatabase.create_auth_session(
@@ -253,7 +253,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             raise credentials_exception
         
         # Get user from database
-        from auth_models import UserDatabase
+        from auth.auth_models import UserDatabase
         user = await UserDatabase.get_user_by_id(user_id)
         if user is None:
             raise credentials_exception
@@ -279,7 +279,7 @@ async def get_current_user_optional(credentials: HTTPAuthorizationCredentials = 
             return None
         
         # Get user from database
-        from auth_models import UserDatabase
+        from auth.auth_models import UserDatabase
         user = await UserDatabase.get_user_by_id(user_id)
         return user
         
@@ -314,7 +314,7 @@ async def get_optional_user(request: Request) -> Optional[dict]:
             return None
         
         # Get user from database
-        from auth_models import UserDatabase
+        from auth.auth_models import UserDatabase
         user = await UserDatabase.get_user_by_id(user_id)
         return user
         
