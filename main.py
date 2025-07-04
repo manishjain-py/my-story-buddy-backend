@@ -1179,10 +1179,10 @@ async def preflight_my_stories():
         }
     )
 
-async def generate_comic_avatar(uploaded_image_bytes: bytes, avatar_name: str, traits_description: str, request_id: str) -> tuple[bytes, str]:
-    """Generate a comic-style avatar using GPT-4 Vision to analyze uploaded image and DALL-E 3 to generate the avatar."""
+async def create_comic_avatar_and_extract_traits(uploaded_image_bytes: bytes, avatar_name: str, traits_description: str, request_id: str) -> tuple[bytes, str]:
+    """Process uploaded image into comic-style avatar and extract visual traits from the processed version."""
     try:
-        logger.info(f"Request ID: {request_id} - Starting comic avatar generation")
+        logger.info(f"Request ID: {request_id} - Starting comic avatar creation and visual traits extraction")
         
         # Add validation to ensure image bytes exist
         logger.info(f"Request ID: {request_id} - Image bytes type: {type(uploaded_image_bytes)}")
@@ -1200,97 +1200,22 @@ async def generate_comic_avatar(uploaded_image_bytes: bytes, avatar_name: str, t
             logger.error(f"Request ID: {request_id} - Error encoding image to base64: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to encode image: {str(e)}")
         
-        # First, use GPT-4 Vision to analyze the image and create a detailed description
-        logger.info(f"Request ID: {request_id} - Analyzing uploaded photo with GPT-4 Vision...")
+        # Step 1: Analyze uploaded image to create detailed character description
+        logger.info(f"Request ID: {request_id} - Analyzing uploaded image to create character description...")
         
-        # Step 1: Extract comprehensive visual traits for perfect character consistency
-        traits_response = await client.chat.completions.create(
+        description_response = await client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a concept artist and character designer helping create fictional characters for comic books and cartoons. Your job is to analyze reference artwork and create detailed character design specifications for consistent artistic representation. You work with concept art, reference images, and design materials to help artists create fictional characters."
+                    "content": "You are a character designer who creates detailed descriptions for comic book characters based on reference photos. Focus on distinctive features that would make the character recognizable in cartoon/comic form."
                 },
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": f"""I need a CHARACTER DESIGN SPECIFICATION for my comic book character '{avatar_name}'. This concept art reference shows the visual style I want to achieve.
-
-Please analyze this artwork and create detailed design notes that my art team can use to draw this fictional character consistently across multiple comic panels.
-
-Create the design specification in this EXACT format:
-
-=== CHARACTER REFERENCE CARD ===
-Name: {avatar_name}
-Art Style: Cute comic/cartoon style with soft colors
-
-PHYSICAL DESIGN ELEMENTS:
-- Face Shape: [describe the geometric shape - round/oval/square/heart/diamond]
-- Skin Tone: [describe color/shade for art purposes]
-- Eye Design: [color, size, shape - for character design]
-- Eye Shape: [artistic style - round/almond/wide/narrow]
-- Eyebrow Style: [thickness, arch, color - for drawing reference]
-- Nose Design: [artistic style - small/button/straight/upturned]
-- Mouth Design: [size, style - for character expressions]
-
-HAIR DESIGN:
-- Hair Color: [specific artistic color - "warm brown", "golden blonde", "jet black"]
-- Hair Texture: [artistic texture - straight/wavy/curly/coiled]
-- Hair Length: [design specification - short/medium/long/shoulder-length]
-- Hair Style: [cut/style - bangs, layers, parting for character design]
-- Hair Volume: [artistic volume - thick/thin/voluminous/fine]
-
-CLOTHING DESIGN:
-- Outfit Style: [describe garments visible for character design]
-- Color Scheme: [primary colors for costume/outfit design]
-- Fashion Style: [design aesthetic - casual/formal/sporty/artistic]
-
-CHARACTER DESIGN FEATURES:
-- Accessories: [design elements - glasses style, jewelry, etc.]
-- Facial Details: [design elements like facial hair, distinctive marks]
-- Unique Design Elements: [artistic features that make character recognizable]
-- Default Expression: [character's typical expression for consistent portrayal]
-
-COMIC ART SPECIFICATIONS:
-- Key Visual Elements: [3 main features for character recognition in comics]
-- Character Color Palette: [primary colors for this character's design]
-- Art Style Notes: [how to draw this character consistently in comic panels]
-
-This is for creating a consistent fictional character design based on these visual reference elements."""
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_base64}",
-                                "detail": "high"
-                            }
-                        }
-                    ]
-                }
-            ],
-            max_tokens=800,
-            temperature=0.1
-        )
-        
-        visual_traits = traits_response.choices[0].message.content
-        logger.info(f"Request ID: {request_id} - Visual traits extracted: {visual_traits}")
-        
-        # Step 2: Create detailed description for avatar generation
-        vision_response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a concept artist and character designer creating fictional characters for comic books. You specialize in analyzing reference artwork and creating detailed descriptions for digital art generation."
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"I'm designing a comic book character named '{avatar_name}' with these personality traits: {traits_description}. This concept art reference shows the visual style I want to achieve. Please create a detailed artistic description that my digital artist can use to generate a cartoon avatar. Focus on design elements like facial structure, hair styling, outfit design, and distinctive artistic features that would make this fictional character recognizable in comic book style."
+                            "text": f"Analyze this image and create a detailed description for a comic book character named '{avatar_name}' with personality: {traits_description}. Focus on distinctive facial features, hair style, clothing, and any unique characteristics that would make this character recognizable when drawn in cartoon/comic style. Be specific about colors, shapes, and proportions."
                         },
                         {
                             "type": "image_url",
@@ -1306,51 +1231,94 @@ This is for creating a consistent fictional character design based on these visu
             temperature=0.3
         )
         
-        character_description = vision_response.choices[0].message.content
-        logger.info(f"Request ID: {request_id} - Character description generated")
+        character_description = description_response.choices[0].message.content
+        logger.info(f"Request ID: {request_id} - Character description created")
         
-        # Now use DALL-E 3 to generate the comic avatar based on the description
-        enhanced_prompt = f"""
-Create a comic-style character avatar based on this description:
+        # Step 2: Generate comic-style avatar based on the character description
+        logger.info(f"Request ID: {request_id} - Creating comic-style avatar from character description...")
+        
+        style_prompt = f"""
+Create a cute comic book/cartoon character avatar for a children's story app based on this description:
 
 {character_description}
 
-STYLE REQUIREMENTS:
-- Comic book/animated movie style (similar to Pixar/Disney)
-- Vibrant colors with bold, clean outlines
-- Friendly and approachable appearance
-- Single character portrait with simple background
-- High quality digital illustration
-- Character embodies these traits: {traits_description}
-- Suitable for children's story illustrations
+CHARACTER NAME: {avatar_name}
+PERSONALITY: {traits_description}
 
-The character's name is {avatar_name} and should look heroic and friendly.
+STYLE REQUIREMENTS:
+- Cute comic book/cartoon style (similar to Pixar/Disney animation)
+- Vibrant, child-friendly colors with soft pastels
+- Bold, clean outlines and smooth shapes
+- Friendly, approachable appearance suitable for children aged 3-5
+- Single character portrait with simple, clean background
+- Make it look heroic, kind, and adventure-ready
+- Suitable for children's story illustrations
+- Maintain the key features described above to keep character recognizable
+
+Transform the described features into a delightful animated character that children would love to see in their stories.
 """
         
-        logger.info(f"Request ID: {request_id} - Generating avatar image with gpt-image-1...")
-        
+        # Generate comic-style avatar using DALL-E
         avatar_response = await client.images.generate(
             model="gpt-image-1",
-            prompt=enhanced_prompt,
+            prompt=style_prompt,
             n=1
         )
         
-        # Get the generated avatar image
+        # Get the generated comic avatar
         avatar_base64 = avatar_response.data[0].b64_json
         if not avatar_base64:
             raise HTTPException(status_code=500, detail="OpenAI did not return avatar image data")
             
         import base64
-        avatar_bytes = base64.b64decode(avatar_base64)
+        comic_avatar_bytes = base64.b64decode(avatar_base64)
+        logger.info(f"Request ID: {request_id} - Comic-style avatar created successfully")
         
-        logger.info(f"Request ID: {request_id} - Comic avatar generated successfully")
-        return avatar_bytes, visual_traits
+        # Step 2: Extract visual traits from the processed comic-style avatar
+        logger.info(f"Request ID: {request_id} - Extracting visual traits from comic-style avatar...")
+        
+        # Encode the comic avatar for analysis
+        comic_avatar_base64 = base64.b64encode(comic_avatar_bytes).decode('utf-8')
+        
+        # Extract visual traits using the exact same approach as the working test script
+        traits_response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a concept artist creating character designs for comic books. Analyze artwork and create character specifications."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Describe the visual elements in this image as if creating a character design specification for a comic book character. Focus on artistic details like facial structure, hair style, clothing, and distinctive features."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{comic_avatar_base64}",
+                                "detail": "high"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=800,
+            temperature=0.1
+        )
+        
+        visual_traits = traits_response.choices[0].message.content
+        logger.info(f"Request ID: {request_id} - Visual traits extracted successfully from comic-style avatar")
+        
+        return comic_avatar_bytes, visual_traits
         
     except Exception as e:
-        logger.error(f"Request ID: {request_id} - Error generating comic avatar: {str(e)}")
+        logger.error(f"Request ID: {request_id} - Error creating comic avatar and extracting traits: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to generate comic avatar: {str(e)}"
+            detail=f"Failed to create comic avatar and extract traits: {str(e)}"
         )
 
 async def generate_avatar_background_task(avatar_id: int, image_bytes: bytes, avatar_name: str, traits_description: str, request_id: str, user_id: int):
@@ -1358,8 +1326,8 @@ async def generate_avatar_background_task(avatar_id: int, image_bytes: bytes, av
     try:
         logger.info(f"Request ID: {request_id} - Starting background avatar generation for avatar_id: {avatar_id}")
         
-        # Generate comic-style avatar with visual traits extraction
-        avatar_image_bytes, visual_traits = await generate_comic_avatar(
+        # Create comic-style avatar and extract visual traits
+        avatar_image_bytes, visual_traits = await create_comic_avatar_and_extract_traits(
             image_bytes, avatar_name, traits_description, request_id
         )
         
@@ -1492,8 +1460,8 @@ async def create_avatar(
         
         logger.info(f"Request ID: {request_id} - Image validation passed: {len(image_bytes)} bytes")
         
-        # Generate comic-style avatar with visual traits extraction
-        avatar_image_bytes, visual_traits = await generate_comic_avatar(
+        # Create comic-style avatar and extract visual traits
+        avatar_image_bytes, visual_traits = await create_comic_avatar_and_extract_traits(
             image_bytes, avatar_name, traits_description, request_id
         )
         
