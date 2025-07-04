@@ -1,10 +1,13 @@
 """
 Authentication models and database schema for My Story Buddy
 """
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel, EmailStr
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 # Enums
 class AuthType(str, Enum):
@@ -135,14 +138,21 @@ class UserDatabase:
         params = (email, password_hash, first_name, last_name, auth_type.value, google_id, is_verified)
         
         try:
-            await db_manager.execute_update(query, params)
-            
-            # Get the inserted user ID
-            result = await db_manager.execute_query("SELECT LAST_INSERT_ID() as id")
-            return result[0]['id'] if result else None
+            # Use the database manager's connection context to ensure same connection
+            async with db_manager.get_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(query, params)
+                    user_id = cursor.lastrowid
+                    
+                    logger.info(f"User created successfully with ID: {user_id}")
+                    return user_id
             
         except Exception as e:
+            logger.error(f"Error creating user: {str(e)}")
+            logger.error(f"Query: {query}")
+            logger.error(f"Params: {params}")
             if "Duplicate entry" in str(e):
+                logger.warning(f"User already exists with email: {email}")
                 return None  # User already exists
             raise
     

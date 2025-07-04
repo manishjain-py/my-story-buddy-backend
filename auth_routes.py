@@ -66,6 +66,7 @@ async def signup(user_data: UserSignup, request: Request):
         password_hash = PasswordUtils.hash_password(user_data.password)
         
         # Create user in database
+        logger.info(f"Creating user account for: {user_data.email}")
         user_id = await UserDatabase.create_user(
             email=user_data.email.lower(),
             first_name=first_name,
@@ -74,19 +75,26 @@ async def signup(user_data: UserSignup, request: Request):
             auth_type=AuthType.EMAIL_PASSWORD
         )
         
+        logger.info(f"User creation result - user_id: {user_id}")
+        
         if not user_id:
+            logger.error(f"create_user returned None for email: {user_data.email}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create user account"
             )
         
         # Get the created user
+        logger.info(f"Retrieving created user with ID: {user_id}")
         user = await UserDatabase.get_user_by_id(user_id)
         if not user:
+            logger.error(f"Failed to retrieve user with ID: {user_id}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to retrieve created user"
             )
+        
+        logger.info(f"User retrieved successfully: {user['email']}")
         
         # Send welcome email (don't wait for it)
         try:
@@ -95,7 +103,9 @@ async def signup(user_data: UserSignup, request: Request):
             logger.warning(f"Failed to send welcome email: {str(e)}")
         
         # Create authentication token
+        logger.info(f"Creating authentication token for user: {user['email']}")
         token_data = await create_user_token(user)
+        logger.info(f"Token created successfully for user: {user['email']}")
         
         logger.info(f"User signup successful: {user_data.email}")
         
