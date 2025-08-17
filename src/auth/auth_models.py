@@ -347,7 +347,7 @@ class UserDatabase:
                         user_data = await cursor.fetchone()
                         
                         if user_data:
-                            user_email = user_data['email']
+                            user_email = user_data[0]
                             await cursor.execute(
                                 "DELETE FROM user_otps WHERE email = %s", 
                                 (user_email,)

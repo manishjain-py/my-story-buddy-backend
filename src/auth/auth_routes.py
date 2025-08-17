@@ -3,6 +3,7 @@ Authentication routes for My Story Buddy
 Handles signup, login, OTP, and Google OAuth endpoints
 """
 import logging
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, status, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials
