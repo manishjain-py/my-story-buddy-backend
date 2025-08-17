@@ -348,6 +348,49 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
             detail="Failed to get user information"
         )
 
+@auth_router.delete("/delete-account")
+async def delete_account(current_user: dict = Depends(get_current_user)):
+    """
+    Permanently delete user account and all associated data
+    
+    This endpoint provides complete account deletion as required by App Store guidelines.
+    All user data including stories, avatars, and account information will be permanently removed.
+    """
+    try:
+        user_id = current_user["id"]
+        user_email = current_user["email"]
+        
+        logger.info(f"Starting account deletion for user ID: {user_id}, email: {user_email}")
+        
+        # Delete user account and all associated data
+        deletion_successful = await UserDatabase.delete_user_account(user_id)
+        
+        if not deletion_successful:
+            logger.error(f"Failed to delete account for user ID: {user_id}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to delete account. Please try again or contact support."
+            )
+        
+        logger.info(f"Account deletion successful for user ID: {user_id}, email: {user_email}")
+        
+        return JSONResponse(
+            content={
+                "message": "Account successfully deleted",
+                "timestamp": datetime.now().isoformat(),
+                "note": "All account data has been permanently removed and cannot be recovered"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Account deletion error for user {current_user.get('id', 'unknown')}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error during account deletion"
+        )
+
 # Health check endpoint for authentication service
 @auth_router.get("/health")
 async def auth_health_check():

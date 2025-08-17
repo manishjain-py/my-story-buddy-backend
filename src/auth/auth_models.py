@@ -286,3 +286,97 @@ class UserDatabase:
         
         query = "UPDATE user_auth_sessions SET is_active = FALSE WHERE session_token = %s"
         await db_manager.execute_update(query, (session_token,))
+    
+    @staticmethod
+    async def delete_user_account(user_id: int) -> bool:
+        """
+        Permanently delete user account and all associated data
+        
+        This method removes:
+        - User stories and metadata
+        - User avatars and personalization data
+        - User authentication sessions
+        - User OTP records
+        - User account record
+        
+        Returns True if deletion was successful, False otherwise.
+        """
+        from core.database import db_manager
+        
+        try:
+            async with db_manager.get_connection() as conn:
+                async with conn.cursor() as cursor:
+                    # Start transaction for atomic deletion
+                    await cursor.execute("START TRANSACTION")
+                    
+                    try:
+                        # 1. Delete user stories (if stories table exists)
+                        try:
+                            await cursor.execute(
+                                "DELETE FROM stories WHERE user_id = %s", 
+                                (user_id,)
+                            )
+                            logger.info(f"Deleted stories for user {user_id}")
+                        except Exception as e:
+                            # Table might not exist in all deployments
+                            logger.warning(f"Could not delete stories for user {user_id}: {str(e)}")
+                        
+                        # 2. Delete user avatars/personalization data (if table exists)
+                        try:
+                            await cursor.execute(
+                                "DELETE FROM user_avatars WHERE user_id = %s", 
+                                (user_id,)
+                            )
+                            logger.info(f"Deleted avatars for user {user_id}")
+                        except Exception as e:
+                            # Table might not exist in all deployments
+                            logger.warning(f"Could not delete avatars for user {user_id}: {str(e)}")
+                        
+                        # 3. Delete user authentication sessions
+                        await cursor.execute(
+                            "DELETE FROM user_auth_sessions WHERE user_id = %s", 
+                            (user_id,)
+                        )
+                        logger.info(f"Deleted auth sessions for user {user_id}")
+                        
+                        # 4. Delete user OTP records
+                        user_result = await cursor.execute(
+                            "SELECT email FROM users WHERE id = %s", 
+                            (user_id,)
+                        )
+                        user_data = await cursor.fetchone()
+                        
+                        if user_data:
+                            user_email = user_data['email']
+                            await cursor.execute(
+                                "DELETE FROM user_otps WHERE email = %s", 
+                                (user_email,)
+                            )
+                            logger.info(f"Deleted OTP records for user {user_id}")
+                        
+                        # 5. Finally, delete the user account itself
+                        result = await cursor.execute(
+                            "DELETE FROM users WHERE id = %s", 
+                            (user_id,)
+                        )
+                        
+                        if cursor.rowcount == 0:
+                            logger.error(f"No user found with ID {user_id} to delete")
+                            await cursor.execute("ROLLBACK")
+                            return False
+                        
+                        logger.info(f"Deleted user account for user {user_id}")
+                        
+                        # Commit all deletions
+                        await cursor.execute("COMMIT")
+                        logger.info(f"Successfully completed account deletion for user {user_id}")
+                        return True
+                        
+                    except Exception as e:
+                        logger.error(f"Error during account deletion for user {user_id}: {str(e)}")
+                        await cursor.execute("ROLLBACK")
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"Database connection error during account deletion for user {user_id}: {str(e)}")
+            return False
