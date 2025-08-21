@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 ADMIN_EMAILS = {
     'admin@mystorybuddy.com',
     'manish@mystorybuddy.com', 
-    'manishjain.py@gmail.com'  # Replace with your actual email
+    'manish_jain1@hotmail.com'  # Main admin email
 }
 
 def is_admin_user(user_email: str) -> bool:
