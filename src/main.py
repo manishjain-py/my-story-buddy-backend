@@ -2348,68 +2348,95 @@ async def cleanup_invalid_stories_endpoint(req: Request):
 
 @app.post("/admin/populate-public-stories")
 async def populate_public_stories_endpoint(req: Request):
-    """Admin endpoint to populate public stories with test data."""
+    """Admin endpoint to populate public stories from existing user stories."""
     try:
-        logger.info("Starting public stories population with test data...")
+        logger.info("Starting public stories population from user stories...")
+        
+        # Get sample stories from user_stories table that have valid S3 URLs and are complete
+        query = """
+        SELECT title, story_content, prompt, image_urls, formats, created_at
+        FROM stories 
+        WHERE image_urls IS NOT NULL 
+          AND image_urls != '[]' 
+          AND image_urls != '' 
+          AND image_urls LIKE '%mystorybuddy-assets.s3%'
+          AND status = 'NEW'
+          AND title != 'Story in Progress...'
+          AND story_content NOT LIKE '%Your story is being generated%'
+          AND LENGTH(story_content) > 200
+        ORDER BY created_at DESC
+        LIMIT 15
+        """
+        
+        sample_stories = await db_manager.execute_query(query)
+        logger.info(f"Found {len(sample_stories)} sample stories with valid S3 URLs")
+        
+        if not sample_stories:
+            return JSONResponse(
+                content={"message": "No suitable user stories found to convert to public stories", "created_count": 0},
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        # Sample categories and tags for variety
+        categories = ["Adventure", "Friendship", "Magic", "Animals", "Learning", "Fantasy", "Family", "Courage", "Discovery"]
+        tag_sets = [
+            ["adventure", "brave", "journey"],
+            ["friendship", "kindness", "sharing"],
+            ["magic", "wonder", "fantasy"],
+            ["animals", "nature", "cute"],
+            ["learning", "discovery", "growth"],
+            ["fantasy", "magical", "imagination"],
+            ["family", "love", "together"],
+            ["courage", "brave", "hero"],
+            ["discovery", "explore", "find"]
+        ]
         
         # Import create_public_story function
         from core.database import create_public_story
         
-        # Create some test public stories
-        test_stories = [
-            {
-                "title": "The Magical Forest Adventure",
-                "story_content": "Once upon a time, there was a little bunny named Bella who loved to explore. One sunny morning, she discovered a magical forest where the trees sparkled with golden light. As she hopped deeper into the forest, she met a friendly owl named Oliver who showed her amazing wonders. Together, they found a hidden meadow filled with singing flowers and dancing butterflies. Bella learned that friendship makes every adventure more special. She promised to visit Oliver again soon and hopped home with a heart full of joy.\n\nThe End! (Created By - MyStoryBuddy)",
-                "prompt": "magical forest adventure with friendly animals",
-                "image_urls": ["https://mystorybuddy-assets.s3.amazonaws.com/stories/test_image_1.png"],
-                "formats": ["Text Story", "Comic Book"],
-                "category": "Adventure",
-                "tags": ["adventure", "friendship", "magical"]
-            },
-            {
-                "title": "The Kindness Star",
-                "story_content": "Luna was a little girl who always helped others. When she saw her neighbor Mrs. Rose struggling with groceries, Luna ran to help. When her friend Tommy dropped his crayons, Luna helped pick them up. One night, Luna looked up at the sky and saw a new bright star twinkling just for her. The Kindness Star appeared because Luna's kind heart made the whole world a little brighter. From that day on, whenever someone was kind, the Kindness Star would shine extra bright to celebrate.\n\nThe End! (Created By - MyStoryBuddy)",
-                "prompt": "story about kindness and helping others",
-                "image_urls": ["https://mystorybuddy-assets.s3.amazonaws.com/stories/test_image_2.png"],
-                "formats": ["Text Story"],
-                "category": "Friendship",
-                "tags": ["kindness", "helping", "friendship"]
-            },
-            {
-                "title": "The Dancing Rainbow Dragon",
-                "story_content": "In a land far, far away, there lived a special dragon named Iris who could create rainbows with her dance. Every morning, Iris would stretch her colorful wings and dance across the sky, painting beautiful rainbows for everyone to see. The children in the village would clap and cheer when they saw her graceful moves. One day, Iris felt sad because she thought her dancing wasn't special enough. But when she saw all the smiling faces looking up at her rainbows, she realized that bringing joy to others was the most magical thing of all.\n\nThe End! (Created By - MyStoryBuddy)",
-                "prompt": "rainbow dragon who dances in the sky",
-                "image_urls": ["https://mystorybuddy-assets.s3.amazonaws.com/stories/test_image_3.png"],
-                "formats": ["Text Story", "Comic Book"],
-                "category": "Magic",
-                "tags": ["magic", "dancing", "rainbow"]
-            }
-        ]
-        
-        # Create public stories
+        # Convert sample stories to public stories
         created_count = 0
-        for i, story_data in enumerate(test_stories):
+        for i, story in enumerate(sample_stories):
             try:
-                featured = i == 0  # Make first story featured
+                # Parse image URLs (they're stored as JSON strings)
+                import json
+                image_urls = json.loads(story['image_urls']) if story['image_urls'] else []
+                formats = json.loads(story['formats']) if story['formats'] else ["Text Story"]
+                
+                # Filter out any invalid image URLs
+                valid_image_urls = [url for url in image_urls if url and 'mystorybuddy-assets.s3' in url and not 'placeholder' in url.lower()]
+                
+                if not valid_image_urls:
+                    logger.info(f"Skipping story '{story['title']}' - no valid image URLs")
+                    continue
+                
+                # Add variety to categories and tags
+                category = categories[i % len(categories)]
+                tags = tag_sets[i % len(tag_sets)]
+                featured = i < 3  # Make first 3 stories featured
                 
                 # Create public story
                 public_story_id = await create_public_story(
-                    title=story_data["title"],
-                    story_content=story_data["story_content"],
-                    prompt=story_data["prompt"],
-                    image_urls=story_data["image_urls"],
-                    formats=story_data["formats"],
-                    category=story_data["category"],
+                    title=story['title'],
+                    story_content=story['story_content'],
+                    prompt=story['prompt'],
+                    image_urls=valid_image_urls,
+                    formats=formats,
+                    category=category,
                     age_group="3-5",
                     featured=featured,
-                    tags=story_data["tags"]
+                    tags=tags
                 )
                 
-                logger.info(f"Created public story {public_story_id}: {story_data['title']} (Category: {story_data['category']}, Featured: {featured})")
+                logger.info(f"Created public story {public_story_id}: {story['title']} (Category: {category}, Featured: {featured}, Images: {len(valid_image_urls)})")
                 created_count += 1
                 
             except Exception as e:
-                logger.error(f"Error creating public story '{story_data['title']}': {str(e)}")
+                logger.error(f"Error creating public story from '{story['title']}': {str(e)}")
                 continue
         
         # Verify the created stories
@@ -2417,11 +2444,17 @@ async def populate_public_stories_endpoint(req: Request):
         result = await db_manager.execute_query(verification_query)
         total_count = result[0]['count'] if result else 0
         
+        # Get sample of created stories for logging
+        sample_query = "SELECT title, category, featured FROM public_stories WHERE is_active = TRUE ORDER BY created_at DESC LIMIT 5"
+        sample_results = await db_manager.execute_query(sample_query)
+        sample_titles = [(s['title'], s['category'], s['featured']) for s in sample_results]
+        
         return JSONResponse(
             content={
-                "message": f"Successfully created {created_count} test public stories",
+                "message": f"Successfully created {created_count} public stories from user stories",
                 "created_count": created_count,
-                "total_public_stories": total_count
+                "total_public_stories": total_count,
+                "sample_stories": sample_titles
             },
             headers={
                 "Access-Control-Allow-Origin": "*",
