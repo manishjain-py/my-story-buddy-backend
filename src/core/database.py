@@ -216,11 +216,36 @@ async def create_tables():
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         """
         
+        # Public stories table for system-generated stories accessible to all users
+        public_stories_table = """
+        CREATE TABLE IF NOT EXISTS public_stories (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            title VARCHAR(500) NOT NULL,
+            story_content TEXT NOT NULL,
+            prompt TEXT,
+            image_urls JSON,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            formats JSON,
+            category VARCHAR(100) DEFAULT 'General',
+            age_group VARCHAR(50) DEFAULT '3-5',
+            is_active BOOLEAN DEFAULT TRUE,
+            featured BOOLEAN DEFAULT FALSE,
+            tags JSON,
+            INDEX idx_created_at (created_at),
+            INDEX idx_category (category),
+            INDEX idx_age_group (age_group),
+            INDEX idx_is_active (is_active),
+            INDEX idx_featured (featured)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        """
+        
         # Execute table creation
         await db_manager.execute_update(stories_table)
         await db_manager.execute_update(fun_facts_table)
         await db_manager.execute_update(sessions_table)
         await db_manager.execute_update(avatars_table)
+        await db_manager.execute_update(public_stories_table)
         
         # Run migrations for existing tables
         await run_migrations()
@@ -840,4 +865,211 @@ async def cleanup_invalid_stories() -> dict:
         
     except Exception as e:
         logger.error(f"Error cleaning up invalid stories: {str(e)}")
+        raise
+
+# Public Stories management functions
+async def create_public_story(title: str, story_content: str, prompt: str = None, image_urls: list = None, 
+                             formats: list = None, category: str = "General", age_group: str = "3-5", 
+                             featured: bool = False, tags: list = None) -> int:
+    """Create a new public story."""
+    try:
+        query = """
+        INSERT INTO public_stories (title, story_content, prompt, image_urls, formats, category, age_group, featured, tags)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        import json
+        params = (
+            title,
+            story_content,
+            prompt,
+            json.dumps(image_urls or []),
+            json.dumps(formats or ["Text Story"]),
+            category,
+            age_group,
+            featured,
+            json.dumps(tags or [])
+        )
+        
+        # Use a direct connection to get the insert ID
+        async with db_manager.get_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, params)
+                story_id = cursor.lastrowid
+                logger.info(f"Public story created with ID: {story_id}")
+                return story_id
+        
+    except Exception as e:
+        logger.error(f"Error creating public story: {str(e)}")
+        raise
+
+async def get_public_stories(limit: int = 20, offset: int = 0, category: str = None, featured_only: bool = False) -> list:
+    """Get public stories with optional filtering."""
+    try:
+        # Build query with optional filters
+        where_conditions = ["is_active = TRUE"]
+        params = []
+        
+        if category:
+            where_conditions.append("category = %s")
+            params.append(category)
+            
+        if featured_only:
+            where_conditions.append("featured = TRUE")
+            
+        where_clause = " AND ".join(where_conditions)
+        
+        query = f"""
+        SELECT id, title, story_content, prompt, image_urls, formats, category, age_group, 
+               featured, tags, created_at, updated_at
+        FROM public_stories 
+        WHERE {where_clause}
+        ORDER BY featured DESC, created_at DESC
+        LIMIT %s OFFSET %s
+        """
+        
+        params.extend([limit, offset])
+        results = await db_manager.execute_query(query, tuple(params))
+        
+        # Parse JSON fields
+        import json
+        for result in results:
+            if result['image_urls']:
+                result['image_urls'] = json.loads(result['image_urls'])
+            if result['formats']:
+                result['formats'] = json.loads(result['formats'])
+            if result['tags']:
+                result['tags'] = json.loads(result['tags'])
+                
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error fetching public stories: {str(e)}")
+        return []
+
+async def get_public_story_by_id(story_id: int) -> dict:
+    """Get a specific public story by ID."""
+    try:
+        query = """
+        SELECT id, title, story_content, prompt, image_urls, formats, category, age_group,
+               featured, tags, created_at, updated_at
+        FROM public_stories 
+        WHERE id = %s AND is_active = TRUE
+        """
+        
+        results = await db_manager.execute_query(query, (story_id,))
+        
+        if results:
+            import json
+            result = results[0]
+            if result['image_urls']:
+                result['image_urls'] = json.loads(result['image_urls'])
+            if result['formats']:
+                result['formats'] = json.loads(result['formats'])
+            if result['tags']:
+                result['tags'] = json.loads(result['tags'])
+            return result
+        else:
+            return None
+        
+    except Exception as e:
+        logger.error(f"Error fetching public story by ID: {str(e)}")
+        return None
+
+async def get_public_stories_count(category: str = None, featured_only: bool = False) -> int:
+    """Get total count of public stories for pagination."""
+    try:
+        where_conditions = ["is_active = TRUE"]
+        params = []
+        
+        if category:
+            where_conditions.append("category = %s")
+            params.append(category)
+            
+        if featured_only:
+            where_conditions.append("featured = TRUE")
+            
+        where_clause = " AND ".join(where_conditions)
+        
+        query = f"""
+        SELECT COUNT(*) as count
+        FROM public_stories 
+        WHERE {where_clause}
+        """
+        
+        results = await db_manager.execute_query(query, tuple(params))
+        return results[0]['count'] if results else 0
+        
+    except Exception as e:
+        logger.error(f"Error getting public stories count: {str(e)}")
+        return 0
+
+async def get_public_story_categories() -> list:
+    """Get list of available categories."""
+    try:
+        query = """
+        SELECT DISTINCT category 
+        FROM public_stories 
+        WHERE is_active = TRUE AND category IS NOT NULL
+        ORDER BY category
+        """
+        
+        results = await db_manager.execute_query(query)
+        return [row['category'] for row in results]
+        
+    except Exception as e:
+        logger.error(f"Error fetching public story categories: {str(e)}")
+        return []
+
+async def update_public_story(story_id: int, title: str = None, story_content: str = None, 
+                             category: str = None, featured: bool = None, tags: list = None) -> bool:
+    """Update a public story."""
+    try:
+        # Build dynamic update query
+        update_fields = []
+        params = []
+        
+        if title is not None:
+            update_fields.append("title = %s")
+            params.append(title)
+            
+        if story_content is not None:
+            update_fields.append("story_content = %s")
+            params.append(story_content)
+            
+        if category is not None:
+            update_fields.append("category = %s")
+            params.append(category)
+            
+        if featured is not None:
+            update_fields.append("featured = %s")
+            params.append(featured)
+            
+        if tags is not None:
+            import json
+            update_fields.append("tags = %s")
+            params.append(json.dumps(tags))
+            
+        if not update_fields:
+            return False
+            
+        update_fields.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(story_id)
+        
+        query = f"""
+        UPDATE public_stories 
+        SET {', '.join(update_fields)}
+        WHERE id = %s AND is_active = TRUE
+        """
+        
+        affected_rows = await db_manager.execute_update(query, tuple(params))
+        if affected_rows > 0:
+            logger.info(f"Public story {story_id} updated successfully")
+            return True
+        else:
+            logger.warning(f"No public story found with id: {story_id}")
+            return False
+        
+    except Exception as e:
+        logger.error(f"Error updating public story: {str(e)}")
         raise

@@ -199,6 +199,11 @@ class AvatarUpdateRequest(BaseModel):
     avatar_name: str = None
     traits_description: str = None
 
+class PublicStoriesResponse(BaseModel):
+    stories: list
+    total_count: int
+    categories: list
+
 # Helper functions
 def cors_error_response(message: str, status_code: int = 500):
     return JSONResponse(
@@ -2132,6 +2137,149 @@ async def get_completed_avatars_count(req: Request):
         logger.error(f"Error getting completed avatars count: {str(e)}")
         return cors_error_response(f"Failed to get completed avatars count: {str(e)}")
 
+@app.get("/public-stories", response_model=PublicStoriesResponse)
+async def get_public_stories(
+    page: int = 1,
+    limit: int = 20,
+    category: str = None,
+    featured_only: bool = False
+):
+    """Get public stories with pagination and optional filtering."""
+    try:
+        logger.info(f"Fetching public stories - page: {page}, limit: {limit}, category: {category}, featured_only: {featured_only}")
+        
+        # Calculate offset
+        offset = (page - 1) * limit
+        
+        # Get stories from database
+        from core.database import get_public_stories, get_public_stories_count, get_public_story_categories
+        
+        stories = await get_public_stories(
+            limit=limit, 
+            offset=offset, 
+            category=category, 
+            featured_only=featured_only
+        )
+        
+        total_count = await get_public_stories_count(
+            category=category, 
+            featured_only=featured_only
+        )
+        
+        categories = await get_public_story_categories()
+        
+        # Format stories for response
+        formatted_stories = []
+        for story in stories:
+            formatted_stories.append({
+                "id": story["id"],
+                "title": story["title"],
+                "story_content": story["story_content"],
+                "prompt": story["prompt"],
+                "image_urls": story["image_urls"] or [],
+                "formats": story["formats"] or [],
+                "category": story["category"],
+                "age_group": story["age_group"],
+                "featured": story["featured"],
+                "tags": story["tags"] or [],
+                "created_at": story["created_at"].isoformat() if story["created_at"] else None,
+                "updated_at": story["updated_at"].isoformat() if story["updated_at"] else None
+            })
+        
+        logger.info(f"Retrieved {len(formatted_stories)} public stories")
+        
+        return JSONResponse(
+            content={
+                "stories": formatted_stories,
+                "total_count": total_count,
+                "categories": categories
+            },
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error fetching public stories: {str(e)}")
+        return JSONResponse(
+            content={"error": "Failed to fetch public stories"},
+            status_code=500,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+
+@app.get("/public-stories/{story_id}")
+async def get_public_story(story_id: int):
+    """Get a specific public story by ID."""
+    try:
+        logger.info(f"Fetching public story with ID: {story_id}")
+        
+        from core.database import get_public_story_by_id
+        story = await get_public_story_by_id(story_id)
+        
+        if not story:
+            return JSONResponse(
+                content={"error": "Story not found"},
+                status_code=404,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        formatted_story = {
+            "id": story["id"],
+            "title": story["title"],
+            "story_content": story["story_content"],
+            "prompt": story["prompt"],
+            "image_urls": story["image_urls"] or [],
+            "formats": story["formats"] or [],
+            "category": story["category"],
+            "age_group": story["age_group"],
+            "featured": story["featured"],
+            "tags": story["tags"] or [],
+            "created_at": story["created_at"].isoformat() if story["created_at"] else None,
+            "updated_at": story["updated_at"].isoformat() if story["updated_at"] else None
+        }
+        
+        return JSONResponse(
+            content=formatted_story,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error fetching public story {story_id}: {str(e)}")
+        return JSONResponse(
+            content={"error": "Failed to fetch story"},
+            status_code=500,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+
+@app.options("/public-stories")
+async def preflight_public_stories():
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
+
 @app.api_route("/{path:path}", methods=["GET", "POST", "OPTIONS"])
 async def catch_all(path: str, request: Request):
     # Handle OPTIONS preflight for any path
@@ -2184,6 +2332,117 @@ async def cleanup_invalid_stories_endpoint(req: Request):
         
     except Exception as e:
         logger.error(f"Error in cleanup endpoint: {str(e)}")
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=500,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS", 
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+
+@app.post("/admin/populate-public-stories")
+async def populate_public_stories_endpoint(req: Request):
+    """Admin endpoint to populate public stories from existing user stories."""
+    try:
+        logger.info("Starting public stories population...")
+        
+        # Get sample stories from user_stories table
+        query = """
+        SELECT title, story_content, prompt, image_urls, formats, created_at
+        FROM stories 
+        WHERE image_urls IS NOT NULL 
+          AND image_urls != '[]' 
+          AND image_urls != '' 
+          AND image_urls LIKE '%s3%'
+          AND status = 'NEW'
+          AND title != 'Story in Progress...'
+        ORDER BY created_at DESC
+        LIMIT 10
+        """
+        
+        sample_stories = await db_manager.execute_query(query)
+        logger.info(f"Found {len(sample_stories)} sample stories with valid S3 URLs")
+        
+        if not sample_stories:
+            return JSONResponse(
+                content={"message": "No sample stories found", "created_count": 0},
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "*"
+                }
+            )
+        
+        # Sample categories and tags for variety
+        categories = ["Adventure", "Friendship", "Magic", "Animals", "Learning", "Fantasy"]
+        tag_sets = [
+            ["adventure", "brave", "journey"],
+            ["friendship", "kindness", "sharing"],
+            ["magic", "wonder", "fantasy"],
+            ["animals", "nature", "cute"],
+            ["learning", "discovery", "growth"],
+            ["fantasy", "magical", "imagination"]
+        ]
+        
+        # Import create_public_story function
+        from core.database import create_public_story
+        
+        # Convert sample stories to public stories
+        created_count = 0
+        for i, story in enumerate(sample_stories):
+            try:
+                # Parse image URLs (they're stored as JSON strings)
+                import json
+                image_urls = json.loads(story['image_urls']) if story['image_urls'] else []
+                formats = json.loads(story['formats']) if story['formats'] else ["Text Story"]
+                
+                # Add variety to categories and tags
+                category = categories[i % len(categories)]
+                tags = tag_sets[i % len(tag_sets)]
+                featured = i < 3  # Make first 3 stories featured
+                
+                # Create public story
+                public_story_id = await create_public_story(
+                    title=story['title'],
+                    story_content=story['story_content'],
+                    prompt=story['prompt'],
+                    image_urls=image_urls,
+                    formats=formats,
+                    category=category,
+                    age_group="3-5",
+                    featured=featured,
+                    tags=tags
+                )
+                
+                logger.info(f"Created public story {public_story_id}: {story['title']} (Category: {category}, Featured: {featured})")
+                created_count += 1
+                
+            except Exception as e:
+                logger.error(f"Error creating public story from '{story['title']}': {str(e)}")
+                continue
+        
+        # Verify the created stories
+        verification_query = "SELECT COUNT(*) as count FROM public_stories WHERE is_active = TRUE"
+        result = await db_manager.execute_query(verification_query)
+        total_count = result[0]['count'] if result else 0
+        
+        return JSONResponse(
+            content={
+                "message": f"Successfully created {created_count} public stories",
+                "created_count": created_count,
+                "total_public_stories": total_count
+            },
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error populating public stories: {str(e)}")
         return JSONResponse(
             content={"error": str(e)},
             status_code=500,
