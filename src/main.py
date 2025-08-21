@@ -2302,6 +2302,10 @@ async def catch_all(path: str, request: Request):
     # Route to appropriate function based on path
     if path == "generateFunFacts":
         return await generate_fun_facts(FunFactRequest(prompt=prompt), request)
+    elif path == "admin/populate-public-stories":
+        return await populate_public_stories_endpoint(request)
+    elif path == "admin/cleanup-stories":
+        return await cleanup_invalid_stories_endpoint(request)
     else:
         # Default to story generation for backward compatibility
         from fastapi import BackgroundTasks
