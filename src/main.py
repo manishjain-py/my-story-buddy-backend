@@ -2306,6 +2306,8 @@ async def catch_all(path: str, request: Request):
         return await populate_public_stories_endpoint(request)
     elif path == "admin/cleanup-stories":
         return await cleanup_invalid_stories_endpoint(request)
+    elif path == "admin/copy-stories-simple":
+        return await copy_stories_simple_endpoint(request)
     else:
         # Default to story generation for backward compatibility
         from fastapi import BackgroundTasks
@@ -2466,6 +2468,91 @@ async def populate_public_stories_endpoint(req: Request):
     except Exception as e:
         logger.error(f"Error populating public stories: {str(e)}")
         logger.error(f"Error details: {traceback.format_exc()}")
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=500,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS", 
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+
+@app.post("/admin/copy-stories-simple")
+async def copy_stories_simple_endpoint(req: Request):
+    """Simple admin endpoint to copy stories using direct SQL."""
+    try:
+        logger.info("Starting simple copy of stories to public_stories...")
+        
+        # Direct SQL to copy stories
+        copy_sql = """
+        INSERT INTO public_stories (title, story_content, prompt, image_urls, formats, category, age_group, featured, tags)
+        SELECT 
+            title,
+            story_content,
+            prompt,
+            image_urls,
+            formats,
+            CASE 
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 1 THEN 'Adventure'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 2 THEN 'Friendship'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 3 THEN 'Magic'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 4 THEN 'Animals'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 5 THEN 'Learning'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 6 THEN 'Fantasy'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 7 THEN 'Family'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 8 THEN 'Courage'
+                ELSE 'Discovery'
+            END as category,
+            '3-5' as age_group,
+            CASE WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) <= 3 THEN TRUE ELSE FALSE END as featured,
+            CASE 
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 1 THEN '["adventure", "brave", "journey"]'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 2 THEN '["friendship", "kindness", "sharing"]'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 3 THEN '["magic", "wonder", "fantasy"]'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 4 THEN '["animals", "nature", "cute"]'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 5 THEN '["learning", "discovery", "growth"]'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 6 THEN '["fantasy", "magical", "imagination"]'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 7 THEN '["family", "love", "together"]'
+                WHEN ROW_NUMBER() OVER (ORDER BY created_at DESC) % 9 = 8 THEN '["courage", "brave", "hero"]'
+                ELSE '["discovery", "explore", "find"]'
+            END as tags
+        FROM stories 
+        WHERE image_urls IS NOT NULL 
+          AND image_urls != '[]' 
+          AND image_urls != '' 
+          AND image_urls LIKE '%mystorybuddy-assets.s3%'
+          AND status = 'NEW'
+          AND title != 'Story in Progress...'
+          AND story_content NOT LIKE '%Your story is being generated%'
+          AND LENGTH(story_content) > 200
+        ORDER BY created_at DESC
+        LIMIT 10
+        """
+        
+        # Execute the copy
+        copied_rows = await db_manager.execute_update(copy_sql)
+        
+        # Get count of public stories
+        count_query = "SELECT COUNT(*) as count FROM public_stories WHERE is_active = TRUE"
+        result = await db_manager.execute_query(count_query)
+        total_count = result[0]['count'] if result else 0
+        
+        return JSONResponse(
+            content={
+                "message": f"Successfully copied {copied_rows} stories to public_stories",
+                "copied_count": copied_rows,
+                "total_public_stories": total_count
+            },
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error copying stories: {str(e)}")
         return JSONResponse(
             content={"error": str(e)},
             status_code=500,
