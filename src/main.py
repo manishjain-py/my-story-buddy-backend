@@ -33,6 +33,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Admin role checking - Add your admin emails here  
+ADMIN_EMAILS = {
+    'admin@mystorybuddy.com',
+    'manish@mystorybuddy.com', 
+    'manishjain.py@gmail.com'  # Replace with your actual email
+}
+
+def is_admin_user(user_email: str) -> bool:
+    """Check if user email is in admin list"""
+    return user_email.lower() in {email.lower() for email in ADMIN_EMAILS}
+
+async def get_admin_user(request: Request):
+    """Get current user and verify admin status"""
+    try:
+        from auth.auth_utils import get_current_user
+        from fastapi.security import HTTPBearer
+        
+        security = HTTPBearer()
+        credentials = await security(request)
+        current_user = await get_current_user(credentials)
+        
+        if not is_admin_user(current_user['email']):
+            raise HTTPException(status_code=403, detail="Admin access required")
+            
+        return current_user
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
 # Initialize FastAPI
 app = FastAPI(
     title="My Story Buddy API",
@@ -2314,6 +2342,8 @@ async def catch_all(path: str, request: Request):
         return await create_public_story_endpoint(request)
     elif path == "upload-image":
         return await upload_image_endpoint(request)
+    elif path == "auth/is-admin":
+        return await check_admin_status_endpoint(request)
     else:
         # Default to story generation for backward compatibility
         from fastapi import BackgroundTasks
@@ -2650,11 +2680,11 @@ async def copy_one_story_endpoint(req: Request):
         )
 
 @app.post("/admin/create-public-story")
-async def create_public_story_endpoint(req: Request):
+async def create_public_story_endpoint(req: Request, admin_user: dict = Depends(get_admin_user)):
     """Admin endpoint to create a new public story."""
     try:
         data = await req.json()
-        logger.info(f"Creating public story: {data.get('title', 'Untitled')}")
+        logger.info(f"Admin {admin_user['email']} creating public story: {data.get('title', 'Untitled')}")
         
         # Validate required fields
         required_fields = ['title', 'story_content', 'image_urls', 'category']
@@ -2704,7 +2734,7 @@ async def create_public_story_endpoint(req: Request):
         )
 
 @app.post("/upload-image")
-async def upload_image_endpoint(req: Request):
+async def upload_image_endpoint(req: Request, admin_user: dict = Depends(get_admin_user)):
     """Upload image for admin story creation."""
     try:
         form = await req.form()
@@ -2778,6 +2808,66 @@ async def preflight_upload_image():
         headers={
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
+
+@app.get("/auth/is-admin")
+async def check_admin_status_endpoint(req: Request):
+    """Check if current user has admin privileges."""
+    try:
+        from auth.auth_utils import get_current_user_optional
+        from fastapi.security import HTTPBearer
+        
+        security = HTTPBearer()
+        try:
+            credentials = await security(req)
+            current_user = await get_current_user_optional(credentials)
+            
+            if current_user and is_admin_user(current_user.get('email', '')):
+                return JSONResponse(
+                    content={
+                        "is_admin": True,
+                        "user_email": current_user['email'],
+                        "user_name": f"{current_user.get('first_name', '')} {current_user.get('last_name', '')}".strip()
+                    },
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, OPTIONS",
+                        "Access-Control-Allow-Headers": "*"
+                    }
+                )
+        except:
+            pass  # User not authenticated or error occurred
+        
+        # Return false if not admin or not authenticated
+        return JSONResponse(
+            content={"is_admin": False},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error checking admin status: {str(e)}")
+        return JSONResponse(
+            content={"is_admin": False},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+
+@app.options("/auth/is-admin")
+async def preflight_is_admin():
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
             "Access-Control-Allow-Headers": "*"
         }
     )
