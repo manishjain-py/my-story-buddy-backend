@@ -2339,9 +2339,17 @@ async def catch_all(path: str, request: Request):
     elif path == "admin/copy-one-story":
         return await copy_one_story_endpoint(request)
     elif path == "admin/create-public-story":
-        return await create_public_story_endpoint(request)
+        try:
+            admin_user = await get_admin_user(request)
+            return await create_public_story_endpoint(request, admin_user)
+        except HTTPException as e:
+            return JSONResponse(content={"error": e.detail}, status_code=e.status_code)
     elif path == "upload-image":
-        return await upload_image_endpoint(request)
+        try:
+            admin_user = await get_admin_user(request)
+            return await upload_image_endpoint(request, admin_user)
+        except HTTPException as e:
+            return JSONResponse(content={"error": e.detail}, status_code=e.status_code)
     elif path == "auth/is-admin":
         return await check_admin_status_endpoint(request)
     else:
