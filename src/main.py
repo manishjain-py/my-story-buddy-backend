@@ -2310,6 +2310,10 @@ async def catch_all(path: str, request: Request):
         return await copy_stories_simple_endpoint(request)
     elif path == "admin/copy-one-story":
         return await copy_one_story_endpoint(request)
+    elif path == "admin/create-public-story":
+        return await create_public_story_endpoint(request)
+    elif path == "upload-image":
+        return await upload_image_endpoint(request)
     else:
         # Default to story generation for backward compatibility
         from fastapi import BackgroundTasks
@@ -2644,5 +2648,138 @@ async def copy_one_story_endpoint(req: Request):
                 "Access-Control-Allow-Headers": "*"
             }
         )
+
+@app.post("/admin/create-public-story")
+async def create_public_story_endpoint(req: Request):
+    """Admin endpoint to create a new public story."""
+    try:
+        data = await req.json()
+        logger.info(f"Creating public story: {data.get('title', 'Untitled')}")
+        
+        # Validate required fields
+        required_fields = ['title', 'story_content', 'image_urls', 'category']
+        for field in required_fields:
+            if not data.get(field):
+                raise ValueError(f"Missing required field: {field}")
+        
+        # Import create_public_story function
+        from core.database import create_public_story
+        
+        # Create the public story
+        story_id = await create_public_story(
+            title=data['title'],
+            story_content=data['story_content'],
+            prompt=data.get('prompt', ''),
+            image_urls=data['image_urls'],
+            formats=data.get('formats', ['Text Story', 'Comic Book']),
+            category=data['category'],
+            age_group=data.get('age_group', '3-5'),
+            featured=data.get('featured', False),
+            tags=data.get('tags', [])
+        )
+        
+        return JSONResponse(
+            content={
+                "message": f"Successfully created public story: {data['title']}",
+                "story_id": story_id,
+                "title": data['title']
+            },
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error creating public story: {str(e)}")
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=500,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS", 
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+
+@app.post("/upload-image")
+async def upload_image_endpoint(req: Request):
+    """Upload image for admin story creation."""
+    try:
+        form = await req.form()
+        
+        # Get the uploaded file
+        image_file = form.get("image")
+        story_id = form.get("story_id", f"admin_{generate_request_id()}")
+        
+        if not image_file:
+            raise ValueError("No image file provided")
+        
+        # Read file content
+        file_content = await image_file.read()
+        
+        if len(file_content) == 0:
+            raise ValueError("Empty image file")
+        
+        # Generate unique filename
+        import uuid
+        file_extension = image_file.filename.split('.')[-1] if '.' in image_file.filename else 'png'
+        unique_filename = f"{story_id}_{uuid.uuid4().hex[:8]}.{file_extension}"
+        
+        # Upload to S3
+        s3_url = await upload_image_to_s3(file_content, unique_filename)
+        
+        if not s3_url:
+            raise ValueError("Failed to upload image to S3")
+        
+        logger.info(f"Image uploaded successfully: {unique_filename}")
+        
+        return JSONResponse(
+            content={
+                "message": "Image uploaded successfully",
+                "image_url": s3_url,
+                "filename": unique_filename
+            },
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error uploading image: {str(e)}")
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=500,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS", 
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+
+@app.options("/admin/create-public-story")
+async def preflight_create_public_story():
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
+
+@app.options("/upload-image")
+async def preflight_upload_image():
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
 
  
