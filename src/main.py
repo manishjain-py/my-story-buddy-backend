@@ -2324,7 +2324,8 @@ async def catch_all(path: str, request: Request):
     try:
         body = await request.json()
         prompt = body.get("prompt", "")
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        # Handle multipart/form-data or other non-JSON content
         prompt = ""
 
     # Route to appropriate function based on path
